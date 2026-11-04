@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: apple-silicon, os: macos-15, torch: "torch==2.6.0 torchaudio==2.6.0", numpy: "numpy>=1.26,<2.3" }
-          - { arch: intel, os: macos-15-intel, torch: "torch==2.2.2 torchaudio==2.2.2", numpy: "numpy<2" }
+          - { arch: apple-silicon, os: macos-15, torch: "torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0", numpy: "numpy>=1.26,<2" }
+          - { arch: intel, os: macos-15-intel, torch: "torch==2.2.2 torchaudio==2.2.2 torchvision==0.17.2", numpy: "numpy>=1.26,<2" }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -28,13 +28,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ${{ matrix.torch }} "${{ matrix.numpy }}"
           python -m pip install -r requirements.txt "${{ matrix.numpy }}" pywebview pyinstaller
-          python -m pip install speechbrain==1.0.3 "huggingface_hub<0.26" "${{ matrix.numpy }}"
+
       - name: Test the engine (stand-in separator)
         run: |
           python tests/engine_test.py
           python tests/aaf_test.py
       - name: Download and freeze the voice networks
-        run: python tools/export_models.py
+        run: |
+          python -m pip install speechbrain==1.0.3 "huggingface_hub<0.26" ${{ matrix.torch }} "${{ matrix.numpy }}"
+          python tools/export_models.py --only ecapa
+          python -m pip install clearvoice ${{ matrix.torch }} "${{ matrix.numpy }}"
+          python tools/export_models.py --only sep2
+          cat untie/models/meta.json
       - name: Make a test scene with real speech (4 characters, overlaps)
         run: python tests/make_say_scene.py "$RUNNER_TEMP/scene"
       - name: Keep the frozen networks and test scene (for tuning)

@@ -127,7 +127,7 @@ def lanes():
 @app.post("/api/settings")
 def settings():
     d = request.get_json(silent=True) or {}
-    if "voices" in d and int(d["voices"]) in (2, 3):
+    if "voices" in d and int(d["voices"]) == 2:
         P.settings["voices"] = int(d["voices"])
     if d.get("bg") in ("natural", "clean"):
         if P.settings["bg"] != d["bg"]:

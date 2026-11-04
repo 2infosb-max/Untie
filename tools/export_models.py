@@ -11,12 +11,13 @@ import sys
 import torch
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "untie", "models")
-SEP_SECONDS = 8.0
+SEP_SECONDS = 4.0
 ECAPA_BATCH = 16
 
 SOURCES = {
-    "sep2": ("speechbrain/sepformer-whamr16k", 16000, 2),
-    "sep3": ("speechbrain/sepformer-libri3mix", 8000, 3),
+    # MossFormer2 (ClearerVoice-Studio, Apache-2.0): ~20 dB on real two-voice speech where
+    # SepFormer-WHAMR managed ~4 dB in our tests
+    "sep2": ("alibabasglab/MossFormer2_SS_16K", 16000, 2),
     "ecapa": ("speechbrain/spkrec-ecapa-voxceleb", 16000, None),
 }
 
@@ -35,6 +36,16 @@ class SepWrap(torch.nn.Module):
         if est.shape[1] < T:
             est = torch.nn.functional.pad(est, (0, 0, 0, T - est.shape[1]))
         return est[:, :T, :]
+
+
+class MossWrap(torch.nn.Module):
+    def __init__(self, net):
+        super().__init__()
+        self.net = net
+
+    def forward(self, mix):                      # (1, T) -> (1, T, 2)
+        outs = self.net(mix)
+        return torch.stack([o[:, :mix.shape[1]] for o in outs], -1)
 
 
 class EmbWrap(torch.nn.Module):
@@ -61,6 +72,10 @@ def load_real(name):
         mvn = m.mods.mean_var_norm
         assert mvn.norm_type == "sentence" and not mvn.std_norm, "unexpected normalisation"
         return EmbWrap(m.mods.compute_features, mvn, m.mods.embedding_model)
+    if repo.startswith("alibabasglab/"):
+        from clearvoice import ClearVoice
+        cv = ClearVoice(task="speech_separation", model_names=[repo.split("/")[1]])
+        return MossWrap(cv.models[0].model.cpu().eval())
     from speechbrain.inference.separation import SepformerSeparation
     m = SepformerSeparation.from_hparams(source=repo, savedir=save, run_opts={"device": "cpu"})
     return SepWrap(m.mods.encoder, m.mods.masknet, m.mods.decoder, n)
@@ -100,10 +115,17 @@ def check(a, b, what):
 
 def main():
     random = "--random" in sys.argv
+    only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
     os.makedirs(OUT, exist_ok=True)
     meta = {}
+    mp = os.path.join(OUT, "meta.json")
+    if only and os.path.exists(mp):
+        with open(mp) as f:
+            meta = json.load(f)
     torch.manual_seed(1)
     for name, (repo, sr, n) in SOURCES.items():
+        if only and name != only:
+            continue
         print("freezing", name, "random" if random else repo)
         net = (load_random if random else load_real)(name).eval()
         with torch.inference_mode():

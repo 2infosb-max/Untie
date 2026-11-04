@@ -128,13 +128,11 @@ canvas{display:block;width:100%;height:100%;cursor:text}
 
     <section class="step off" id="s2">
       <div class="sh"><span class="num">2</span><h3>Analyse voices</h3></div>
-      <div class="row"><span class="lbl">Voices talking at the same time</span>
-        <div class="seg" id="voicesSeg"><button data-v="2" class="on">2</button><button data-v="3">3</button></div></div>
       <div class="row"><span class="lbl">Characters in the scene</span>
         <select id="countSel"><option value="">Find for me</option></select></div>
       <div class="row"><button class="btn primary wide" id="analyseBtn">Analyse</button></div>
       <div class="prog" id="prog"><div class="bar"><i id="pbar"></i></div><div class="pinfo"><span id="pstage"></span><span><span id="peta"></span> <a id="pstop">Stop</a></span></div></div>
-      <p class="hint" id="voicesHint">Use 3 only when three people really talk over each other: it is slower and less detailed.</p>
+      <p class="hint">The slow step: the separation network listens to every line. Leave it running; you can stop it any time.</p>
     </section>
 
     <section class="step off" id="s3">
@@ -275,8 +273,8 @@ function render(){
   on('#s1', !busy, !!f); on('#s2', f && !busy || S.job.kind==='analyse' && busy, S.analysed);
   on('#s3', S.analysed && !busy, S.chars.length>0); on('#s4', S.analysed && S.chars.length>0 && !busy, S.rendered);
   on('#s5', S.rendered && !busy, false);
-  setSeg($('#voicesSeg'), S.settings.voices); setSeg($('#bgSeg'), S.settings.bg);
-  $('#analyseBtn').textContent = S.analysed ? (S.analysed_voices != S.settings.voices ? 'Analyse again for ' + S.settings.voices + ' voices' : 'Analyse again') : 'Analyse';
+  setSeg($('#bgSeg'), S.settings.bg);
+  $('#analyseBtn').textContent = S.analysed ? 'Analyse again' : 'Analyse';
   $('#untieBtn').textContent = S.rendered ? 'Un-tie again' : 'Un-tie into stems';
   // progress (shown in step 2 for long jobs, also used for un-tie/export)
   const pr = $('#prog');
@@ -385,7 +383,6 @@ $('#countSel').innerHTML = countOpts;
 $('#refindSel').innerHTML = '<option value="">Find again…</option><option value="auto">Automatically</option>' + [...Array(11)].map((_,i)=>`<option value="${i+2}">${i+2} characters</option>`).join('');
 $('#refindSel').onchange = async e => { const v = e.target.value; e.target.value=''; if(!v) return;
   try { await api('/api/find', {count: v==='auto'? null : +v}); charsSig=''; refresh(); toast('Characters found again. Click Un-tie.'); } catch(err){ toast(err.message, true); } };
-$('#voicesSeg').onclick = e => { const b = e.target.closest('button'); if (b) api('/api/settings', {voices:+b.dataset.v}).then(refresh); };
 $('#bgSeg').onclick = e => { const b = e.target.closest('button'); if (b) api('/api/settings', {bg:b.dataset.v}).then(refresh); };
 let fmt = 'pcm24';
 $('#fmtSeg').onclick = e => { const b = e.target.closest('button'); if (b){ fmt = b.dataset.v; setSeg($('#fmtSeg'), fmt); } };

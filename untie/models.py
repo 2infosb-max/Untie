@@ -1,7 +1,7 @@
 """The two neural networks Un-tie uses, loaded from the app bundle.
 
-sep2 / sep3 : SepFormer (SpeechBrain, Apache-2.0) traced to TorchScript - splits a mixture
-              into 2 or 3 voices.
+sep2        : MossFormer2 (ClearerVoice-Studio, Apache-2.0) traced to TorchScript - splits a
+              mixture into 2 voices.
 ecapa       : ECAPA-TDNN speaker embedding (SpeechBrain, Apache-2.0) - "whose voice is this?"
 """
 import json

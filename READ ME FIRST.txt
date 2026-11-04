@@ -11,9 +11,9 @@ INSTALL (once)
 
 EVERY TIME YOU USE IT
 1. Click "Open audio file..." and pick the mixed dialogue (mono or stereo WAV/BWF/AIFF, any sample rate).
-2. Voices talking at the same time: leave on 2 (use 3 only for three-way crosstalk).
-   Characters in the scene: leave on "Find for me", or pick the number if you know it.
-   Click Analyse. This is the slow part - roughly 1 to 3 minutes per minute of dialogue.
+2. Characters in the scene: leave on "Find for me", or pick the number if you know it.
+   Click Analyse. This is the slow part: about 1-2 minutes per minute of dialogue on an
+   Apple-silicon Mac, several times longer on an Intel Mac.
 3. Check the characters and type their real names. If one person was split into two, use
    ... > Same person as... to merge them. If two people were put together, drag over a clean line
    of one of them on the timeline and click "+ New from selection".

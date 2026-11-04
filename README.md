@@ -5,8 +5,8 @@ Mac app that recovers per-character dialogue stems from a mixed mono/stereo dial
 ## How it works
 
 1. **Voice activity** finds every stretch of talking.
-2. **Separation**: a SepFormer network (SpeechBrain, trained on noisy reverberant speech, 16 kHz) splits each 8 s piece into 2 (or 3) voices.
-3. **Who is who**: an ECAPA-TDNN speaker-identity network fingerprints each separated voice every 0.25 s and matches it to a character. Two voices separated at the same moment are always given to two different characters.
+2. **Separation**: a MossFormer2 network (ClearerVoice-Studio, 16 kHz) splits each 4 s piece into 2 voices; the voices are scaled and polarity-matched so together they rebuild the mix.
+3. **Who is who**: an ECAPA-TDNN speaker-identity network fingerprints the voices every 0.25 s - from the original mix where one person talks alone (cleaner), from the separated voices in overlaps. Characters are found by clustering ~2 s solo stretches. Two separated voices talking at once with different fingerprints always go to two different characters.
 4. **Decision every 10 ms**: silence, one character alone, or an overlap.
 5. **Stems from the original**: each 10 ms frame of the original full-resolution spectrum is shared out:
    - one character alone: 100% to them (a plain fade, so the sound is untouched),
@@ -25,4 +25,4 @@ GitHub Actions (`.github/workflows/build-dmg.yml`) builds an Apple-silicon and a
 - `tools/export_models.py`: downloads the networks and freezes them to TorchScript (checked against the originals),
 - a real-speech scene made with macOS voices (4 characters with overlaps), un-tied and scored before and after packaging.
 
-Networks: speechbrain/sepformer-whamr16k, speechbrain/sepformer-libri3mix, speechbrain/spkrec-ecapa-voxceleb (Apache-2.0).
+Networks: alibabasglab/MossFormer2_SS_16K (ClearerVoice-Studio) and speechbrain/spkrec-ecapa-voxceleb, both Apache-2.0.

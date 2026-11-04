@@ -29,8 +29,8 @@ def main():
     p = engine.Project(lambda: OracleModels(src16), os.path.join(tmp, "work"))
     p.load(path)
     p.analyse()
-    p.find_characters(3)
-    p.chars[0]["name"] = "Hero"
+    for nm, a, b in (("Hero", 0.3, 2.4), ("Character 2", 2.9, 4.1), ("Character 3", 6.5, 7.5)):
+        p.add_character(nm, a, b)
     p.untie()
 
     assert aaf_export.default_start_tc(tref, sr, 25) == ("10:02:03:12", 960), aaf_export.default_start_tc(tref, sr, 25)

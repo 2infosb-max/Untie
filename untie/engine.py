@@ -27,7 +27,7 @@ from .models import SR16, WIN16
 HOP16, NFFT16, PAD16 = 160, 640, 240
 FPS = 100
 WSTEP16 = 4000                     # voice identity every 0.25 s
-OVERLAP_S = 2.0
+OVERLAP_S = 1.0
 BLOCK = 1024                       # frames per render block
 COLORS = ["#4FC3F7", "#FF8A65", "#AED581", "#CE93D8", "#FFD54F", "#4DB6AC", "#F48FB1",
           "#9FA8DA", "#FFAB91", "#80CBC4", "#E6EE9C", "#B0BEC5"]
@@ -230,22 +230,9 @@ class Project:
             raise ValueError("No dialogue was found in this file.")
         chunks = []
         t0 = time.time()
-        wst = np.arange(0, L - WIN16 + 1, WSTEP16)
         for ci, (s, a16, b16) in enumerate(starts):
             if cancel():
                 raise Cancelled()
-            seg = np.zeros(L, np.float32)
-            k = max(0, min(L, self.L16 - s))
-            seg[:k] = self.mono16[s:s + k]
-            rms = float(np.sqrt((seg ** 2).mean()))
-            g = float(np.clip(0.05 / max(rms, 1e-6), 0.05, 2000))
-            if hasattr(M, "locate"):
-                M.locate(s)
-            out = M.separate(seg * g, voices) / g
-            out = self._fit_to_mix(out, seg)
-            wins = out[:, wst[:, None] + np.arange(WIN16)[None, :]]          # (v, nW, WIN)
-            wdb = db((wins.astype(np.float64) ** 2).mean(2))
-            emb = M.embed(wins.reshape(-1, WIN16)).reshape(out.shape[0], len(wst), -1)
             # crossfade weight: ramps where pieces overlap, flat elsewhere
             w = np.ones(L, np.float32)
             r = np.linspace(0.001, 1, ov, dtype=np.float32)
@@ -253,18 +240,77 @@ class Project:
                 w[:ov] = r
             if s + L < b16:
                 w[-ov:] = r[::-1]
-            chunks.append({"start": s, "out": out.astype(np.float32), "emb": emb.astype(np.float32),
-                           "wdb": wdb, "wst": wst, "w": w})
+            chunks.append(self._separate_piece(M, s, L, voices, w))
             done = ci + 1
             el = time.time() - t0
-            progress(5 + 90 * done / len(starts), "Separating voices (%d of %d)" % (done, len(starts)),
-                     el / done * (len(starts) - done))
+            progress(5 + 75 * done / len(starts), "Separating voices (%d of %d)" % (done, len(starts)),
+                     el / done * (len(starts) - done) * 1.15)
+        # second pass: every overlap again, centred in its own piece so the network hears both
+        # voices with the most context and no third person
+        regions = self._overlap_regions(chunks) if self.REFINE_OVERLAPS else []
+        per = (time.time() - t0) / max(1, len(starts))
+        for ri, (a16, b16) in enumerate(regions):
+            if cancel():
+                raise Cancelled()
+            s = int(max(0, min((a16 + b16) // 2 - L // 2, self.L16 - L)))
+            w = np.full(L, 0.001, np.float32)
+            lo, hi = max(0, a16 - s - 4800), min(L, b16 - s + 4800)
+            w[lo:hi] = self.REFINE_WEIGHT
+            w = np.maximum(uniform_filter1d(w, 3200, mode="nearest"), 0.001).astype(np.float32)
+            chunks.append(self._separate_piece(M, s, L, voices, w))
+            progress(80 + 15 * (ri + 1) / len(regions), "Refining overlaps (%d of %d)" % (ri + 1, len(regions)),
+                     per * (len(regions) - ri - 1))
         with self.lock:
             self.chunks = chunks
             self.analysed = True
             self.analysed_voices = voices
             self.rendered = False
         progress(100, "Analysed", 0)
+
+    REFINE_WEIGHT = 4.0
+    REFINE_OVERLAPS = False    # tested: no gain on the reference scene for +50% time
+
+    def _separate_piece(self, M, s, L, voices, w):
+        wst = np.arange(0, L - WIN16 + 1, WSTEP16)
+        seg = np.zeros(L, np.float32)
+        k = max(0, min(L, self.L16 - s))
+        seg[:k] = self.mono16[s:s + k]
+        rms = float(np.sqrt((seg ** 2).mean()))
+        g = float(np.clip(0.05 / max(rms, 1e-6), 0.05, 2000))
+        if hasattr(M, "locate"):
+            M.locate(s)
+        out = M.separate(seg * g, voices) / g
+        out = self._fit_to_mix(out, seg)
+        wins = out[:, wst[:, None] + np.arange(WIN16)[None, :]]          # (v, nW, WIN)
+        wdb = db((wins.astype(np.float64) ** 2).mean(2))
+        emb = M.embed(wins.reshape(-1, WIN16)).reshape(out.shape[0], len(wst), -1)
+        memb, solo = self._mix_info(seg, wdb, wst, M)
+        return {"start": s, "out": out.astype(np.float32), "emb": emb.astype(np.float32),
+                "wdb": wdb, "wst": wst, "w": w, "memb": memb, "solo": solo}
+
+    def _overlap_regions(self, chunks):
+        """Where two different voices talk at once (from the first pass), in 16 kHz samples."""
+        mark = np.zeros(self.nF, bool)
+        for c in chunks:
+            if c["out"].shape[0] < 2:
+                continue
+            wdb = c["wdb"]
+            srt = np.sort(wdb, 0)
+            live = (srt[-2] > wdb.max() - 30) & (srt[-2] > self.floor_db + 3)
+            close = (srt[-1] - srt[-2]) < self.SOLO_DB
+            pair = np.sum(c["emb"][0] * c["emb"][1], -1)
+            hit = live & close & (pair < self.DIFFERENT_COS)
+            for wi in np.nonzero(hit)[0]:
+                f = (c["start"] + c["wst"][wi]) // HOP16
+                mark[max(0, f + 35):min(self.nF, f + 65)] = True       # middle 0.3 s of the 1 s window
+        mark = drop_short(fill_gaps(mark, 30), 10)
+        L = self.models.chunk_len16(self.analysed_voices or int(self.settings["voices"]))
+        out = []
+        for a, b in runs(mark):
+            a16, b16 = a * HOP16, b * HOP16
+            if b16 - a16 <= L - 2 * SR16:              # leave at least 1 s of context each side
+                out.append((a16, b16))
+        return out
 
     @staticmethod
     def _fit_to_mix(out, seg):
@@ -285,6 +331,42 @@ class Project:
             wsum[a:b] += w
         return res / np.maximum(wsum, 1e-3)[None]
 
+    SOLO_DB = 9.0              # one separated voice this much louder than the other = one person talking
+    CLUSTER_DIST = 0.50        # voice-print distance that splits two characters (auto count)
+
+    @staticmethod
+    def _mix_info(seg, wdb, wst, M):
+        """Voice prints of the ORIGINAL mix (cleaner than separated voices) and which 1 s windows
+        have just one person talking."""
+        mw = seg[wst[:, None] + np.arange(WIN16)[None, :]]
+        memb = M.embed(mw.astype(np.float32)).astype(np.float32)
+        if wdb.shape[0] > 1:
+            srt = np.sort(wdb, 0)
+            solo = (srt[-1] - srt[-2]) > Project.SOLO_DB
+        else:
+            solo = np.ones(wdb.shape[1], bool)
+        return memb, solo
+
+    def _segments(self):
+        """~2 s stretches of one person talking alone, each with an averaged voice print."""
+        E, W = [], []
+        for c in self.chunks:
+            if "memb" not in c:
+                continue
+            top = c["wdb"].max()
+            ok = c["solo"] & (c["wdb"].max(0) > top - 20) & (c["wdb"].max(0) > self.floor_db + 6)
+            for a, b in runs(ok):
+                for q in range(a, b, 6):
+                    r = slice(q, min(b, q + 6))
+                    if r.stop - r.start < 2:
+                        continue
+                    v = c["memb"][r].mean(0)
+                    E.append(v / (np.linalg.norm(v) + 1e-9))
+                    W.append(r.stop - r.start)
+        if not E:
+            return np.zeros((0, 1), np.float32), np.zeros(0)
+        return np.stack(E), np.array(W, float)
+
     def _windows(self, rel_db=30.0):
         """All voice-identity windows that carry real voice: (embeddings, chunk, output, window)."""
         E, idx = [], []
@@ -300,36 +382,41 @@ class Project:
 
     # ------------------------------------------------------------------ 3. characters
     def find_characters(self, k=None):
-        E, idx = self._windows(20.0)
+        E, Wt = self._segments()
+        if len(E) < 4:                                     # hardly any solo lines: use separated voices
+            E, _ = self._windows(20.0)
+            Wt = np.ones(len(E))
         if len(E) < 4:
             raise ValueError("Not enough clear dialogue to tell the voices apart.")
         rng = np.random.default_rng(0)
-        sub = E if len(E) <= 2500 else E[rng.choice(len(E), 2500, replace=False)]
+        pick = np.arange(len(E)) if len(E) <= 2500 else rng.choice(len(E), 2500, replace=False)
+        sub, sw = E[pick], Wt[pick]
         Z = linkage(sub, method="average", metric="cosine")
         if k:
-            lab = fcluster(Z, t=int(k), criterion="maxclust")
+            lab = fcluster(Z, t=min(int(k), len(sub)), criterion="maxclust")
         else:
-            lab = fcluster(Z, t=0.62, criterion="distance")
+            lab = fcluster(Z, t=self.CLUSTER_DIST, criterion="distance")
         cents = []
         for c in np.unique(lab):
             m = lab == c
-            if k or m.sum() >= max(3, 0.03 * len(sub)):
-                cents.append(sub[m].mean(0))
-        if len(cents) < 2 and len(sub) >= 2:
+            if k or (m.sum() >= 2 and sw[m].sum() >= 0.03 * sw.sum()):
+                v = (sub[m] * sw[m, None]).sum(0)
+                cents.append(v)
+        if len(cents) < 2 and len(sub) >= 2 and not k:
             lab = fcluster(Z, t=2, criterion="maxclust")
-            cents = [sub[lab == c].mean(0) for c in np.unique(lab)]
+            cents = [(sub[lab == c] * sw[lab == c, None]).sum(0) for c in np.unique(lab)]
         C = np.stack(cents)
         C /= np.linalg.norm(C, axis=1, keepdims=True) + 1e-9
-        for _ in range(6):                                  # refine on every window
+        for _ in range(6):                                  # refine on every segment
             a = (E @ C.T).argmax(1)
             newC = []
             for j in range(len(C)):
                 if (a == j).any():
-                    v = E[a == j].mean(0)
+                    v = (E[a == j] * Wt[a == j, None]).sum(0)
                     newC.append(v / (np.linalg.norm(v) + 1e-9))
             C = np.stack(newC)
         a = (E @ C.T).argmax(1)
-        talk = np.bincount(a, minlength=len(C)).astype(float) * WSTEP16 / SR16
+        talk = np.bincount(a, weights=Wt, minlength=len(C)).astype(float)
         order = np.argsort(-talk)
         with self.lock:
             self.chars = []
@@ -437,7 +524,8 @@ class Project:
             out.append(np.max(np.stack([emb @ v for v in vs]), 0))
         return np.stack(out, -1)
 
-    DISTINCT = False
+    DISTINCT = True
+    DIFFERENT_COS = 0.4        # voice prints of two separated voices below this = two people
     MASK_POWER = 1.0
     ISLAND_MIX = 0.0          # how much a whole stretch of talking decides its own label
 
@@ -476,6 +564,12 @@ class Project:
             k = e - s
             w = c["w"][:k]
             sc = self._scores(c["emb"])                                  # (v, nW, K)
+            if "memb" in c and out.shape[0] > 1:
+                # one person alone: judge them from the original mix, which is cleaner
+                msc = self._scores(c["memb"])                            # (nW, K)
+                dom = c["wdb"].argmax(0)
+                solo = c["solo"]
+                sc[dom[solo], np.nonzero(solo)[0]] = msc[solo]
             top = c["wdb"].max()
             valid = (c["wdb"] > top - 30) & (c["wdb"] > self.floor_db + 3)
             centers = (c["wst"] + WIN16 / 2) / HOP16
@@ -493,9 +587,16 @@ class Project:
             labs = curves.argmax(1)                                          # (v, nfr)
             if self.DISTINCT and nv > 1 and K > 1:
                 # two voices the network pulled apart at the same moment are two different people
-                fe = db(np.stack([frame_energy(out[i], nfr, HOP16) for i in range(nv)]))
+                # (only when both are really talking and their voice prints differ - a single voice
+                # that the network split in two must stay one person)
+                fe = db(uniform_filter1d(np.stack([frame_energy(out[i], nfr, HOP16) for i in range(nv)]),
+                                         10, axis=1, mode="nearest"))
                 act = fe > max(fe.max() - 30, self.floor_db + 3)
-                both = act.sum(0) >= 2
+                srt = np.sort(fe, 0)
+                both = (act.sum(0) >= 2) & ((srt[-1] - srt[-2]) < self.SOLO_DB)
+                pair = np.stack([np.sum(c["emb"][0] * c["emb"][j], -1) for j in range(1, nv)]).max(0)
+                pair_f = np.interp(fr, centers, pair)
+                both &= pair_f < self.DIFFERENT_COS
                 if both.any():
                     import itertools
                     perms = np.array(list(itertools.permutations(range(K), min(nv, K))))
