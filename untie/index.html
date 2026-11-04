@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Un-tie</title>
+<style>
+:root{
+  --bg:#0E1012; --panel:#15181B; --panel2:#1B1F23; --line:#262B30; --line2:#323940;
+  --text:#E7E3DC; --dim:#8E959C; --faint:#5B636B;
+  --amber:#F2A93B; --amber2:#FFC56E; --amberbg:rgba(242,169,59,.12);
+  --ok:#7FD69B; --bad:#FF7A6B;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 var(--sans);-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select{font:inherit;color:var(--text)}
+.app{display:grid;grid-template-columns:330px 1fr;grid-template-rows:56px 1fr;height:100vh}
+header{grid-column:1/3;display:flex;align-items:center;gap:18px;padding:0 18px;border-bottom:1px solid var(--line);background:linear-gradient(#121518,#0F1214)}
+.brand{display:flex;align-items:baseline;gap:10px}
+.word{font-size:22px;font-weight:800;letter-spacing:-.5px}
+.word .cut{color:var(--amber);display:inline-block;transform:translateY(-1px) rotate(-12deg);margin:0 1px}
+.by{color:var(--dim);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.fileinfo{display:flex;gap:6px;flex-wrap:wrap;margin-left:12px}
+.chip{border:1px solid var(--line2);border-radius:20px;padding:3px 10px;font-size:11.5px;color:var(--dim);background:var(--panel)}
+.chip b{color:var(--text);font-weight:600}
+.spacer{flex:1}
+.null{font-size:11.5px;color:var(--dim)}
+.null b{color:var(--ok)}
+aside{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel);padding:14px 14px 40px}
+.step{border:1px solid var(--line);border-radius:10px;background:var(--panel2);margin-bottom:12px;padding:12px 12px 13px}
+.step.off{opacity:.45;pointer-events:none}
+.sh{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.num{width:21px;height:21px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--line2);color:var(--dim)}
+.step.done .num{background:var(--amber);color:#1a1205}
+.sh h3{margin:0;font-size:13px;font-weight:650;letter-spacing:.01em}
+.hint{color:var(--dim);font-size:11.8px;margin:6px 0 0}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.lbl{color:var(--dim);font-size:11.8px;flex:1}
+.btn{border:1px solid var(--line2);background:#20252A;border-radius:7px;padding:7px 12px;font-weight:550}
+.btn:hover{border-color:#47505A;background:#252B31}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1b1306;font-weight:700}
+.btn.primary:hover{background:var(--amber2)}
+.btn.wide{width:100%}
+.btn.small{padding:4px 9px;font-size:12px}
+.btn:disabled{opacity:.4;cursor:default}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:5px 11px;color:var(--dim);font-size:12px}
+.seg button.on{background:var(--amberbg);color:var(--amber2);font-weight:650}
+select{background:#20252A;border:1px solid var(--line2);border-radius:7px;padding:5px 8px}
+.prog{margin-top:10px;display:none}
+.prog.on{display:block}
+.bar{height:6px;border-radius:4px;background:#252a2f;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--amber),var(--amber2));transition:width .3s}
+.pinfo{display:flex;justify-content:space-between;color:var(--dim);font-size:11.5px;margin-top:5px;gap:8px}
+.pinfo a{color:var(--amber);cursor:pointer}
+.chars{display:flex;flex-direction:column;gap:6px}
+.ch{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:#181C20;border-radius:8px;padding:5px 6px 5px 8px;position:relative}
+.sw{width:11px;height:11px;border-radius:3px;flex:none}
+.ch input{flex:1;min-width:0;background:transparent;border:1px solid transparent;border-radius:5px;padding:3px 5px}
+.ch input:focus{outline:none;border-color:var(--line2);background:#111417}
+.ico{border:0;background:transparent;color:var(--dim);border-radius:5px;padding:3px 6px}
+.ico:hover{background:#252B31;color:var(--text)}
+.menu{position:absolute;right:4px;top:30px;z-index:20;background:#1F2429;border:1px solid var(--line2);border-radius:8px;padding:5px;min-width:220px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none}
+.menu.on{display:block}
+.menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:6px 9px;border-radius:5px}
+.menu button:hover{background:#2A3036}
+.menu .sep{height:1px;background:var(--line2);margin:4px 2px}
+.menu .t{color:var(--faint);font-size:11px;padding:4px 9px}
+main{display:grid;grid-template-rows:auto 1fr auto;min-width:0;min-height:0}
+.transport{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.play{width:36px;height:36px;border-radius:50%;border:0;background:var(--amber);color:#1b1306;display:grid;place-items:center}
+.play svg{width:14px;height:14px}
+.tc{font:600 20px var(--mono);letter-spacing:.02em;min-width:150px}
+.tcsub{color:var(--faint);font:11px var(--mono)}
+.listen{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-left:8px}
+.listen .t{color:var(--dim);font-size:11.5px;margin-right:3px}
+.pill{border:1px solid var(--line2);background:#181C20;border-radius:20px;padding:4px 11px 4px 9px;font-size:12px;display:flex;align-items:center;gap:6px;color:var(--dim)}
+.pill .sw{width:8px;height:8px;border-radius:50%}
+.pill.on{color:var(--text);border-color:var(--amber);background:var(--amberbg)}
+.zoom{display:flex;gap:4px;align-items:center}
+.stage{position:relative;min-height:0;overflow:hidden}
+canvas{display:block;width:100%;height:100%;cursor:text}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--dim);pointer-events:none}
+.empty h2{color:var(--text);font-size:20px;margin:0 0 6px;font-weight:700}
+.empty p{margin:0 auto;max-width:440px}
+.drop{border:1.5px dashed var(--line2);border-radius:16px;padding:40px 48px}
+.selbar{border-top:1px solid var(--line);padding:9px 16px 11px;background:var(--panel);min-height:52px}
+.selrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.selrow .t{color:var(--dim);font-size:11.8px}
+.selrow .tt{font:12px var(--mono);color:var(--text);margin-right:6px}
+.chipbtn{border:1px solid var(--line2);background:#1B1F23;border-radius:6px;padding:4px 9px;font-size:12px;display:inline-flex;gap:6px;align-items:center}
+.chipbtn:hover{border-color:#4a535d}
+.chipbtn.on{border-color:var(--amber);background:var(--amberbg)}
+.chipbtn .sw{width:8px;height:8px;border-radius:50%}
+.vsep{width:1px;height:20px;background:var(--line2);margin:0 4px}
+.fixes{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.fix{font-size:11.5px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:2px 4px 2px 8px;display:inline-flex;gap:6px;align-items:center;font-family:var(--mono)}
+.fix button{border:0;background:transparent;color:var(--faint);padding:0 4px}
+.fix button:hover{color:var(--bad)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#22282E;border:1px solid var(--line2);border-radius:10px;padding:10px 16px;opacity:0;transition:.25s;pointer-events:none;z-index:50;display:flex;gap:12px;align-items:center;max-width:70vw}
+.toast.on{opacity:1;transform:translateX(-50%);pointer-events:auto}
+.toast.err{border-color:#6b2f28}
+.toast a{color:var(--amber);cursor:pointer;white-space:nowrap}
+.keys{color:var(--faint);font-size:11px;margin-left:auto}
+.keys kbd{font:10.5px var(--mono);border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span class="word">Un<span class="cut">-</span>tie</span><span class="by">by Sound Brewery</span></div>
+    <div class="fileinfo" id="fileinfo"></div>
+    <div class="spacer"></div>
+    <div class="null" id="nullinfo"></div>
+  </header>
+
+  <aside>
+    <section class="step" id="s1">
+      <div class="sh"><span class="num">1</span><h3>Mixed dialogue file</h3></div>
+      <button class="btn wide" id="openBtn">Open audio file…</button>
+      <p class="hint">Mono or stereo WAV, BWF, AIFF, FLAC, MP3 or M4A. The timecode stamp is kept on every stem.</p>
+    </section>
+
+    <section class="step off" id="s2">
+      <div class="sh"><span class="num">2</span><h3>Analyse voices</h3></div>
+      <div class="row"><span class="lbl">Voices talking at the same time</span>
+        <div class="seg" id="voicesSeg"><button data-v="2" class="on">2</button><button data-v="3">3</button></div></div>
+      <div class="row"><span class="lbl">Characters in the scene</span>
+        <select id="countSel"><option value="">Find for me</option></select></div>
+      <div class="row"><button class="btn primary wide" id="analyseBtn">Analyse</button></div>
+      <div class="prog" id="prog"><div class="bar"><i id="pbar"></i></div><div class="pinfo"><span id="pstage"></span><span><span id="peta"></span> <a id="pstop">Stop</a></span></div></div>
+      <p class="hint" id="voicesHint">Use 3 only when three people really talk over each other: it is slower and less detailed.</p>
+    </section>
+
+    <section class="step off" id="s3">
+      <div class="sh"><span class="num">3</span><h3>Characters</h3></div>
+      <div class="chars" id="chars"></div>
+      <div class="row"><button class="btn small" id="newCharBtn">+ New from selection</button><span class="spacer"></span>
+        <select id="refindSel" title="Find the characters again"><option value="">Find again…</option></select></div>
+      <p class="hint">Wrong voices together? Select a clean line of one person on the timeline and use <b>⋯ › Use selection as voice sample</b>, or merge two that are the same person.</p>
+    </section>
+
+    <section class="step off" id="s4">
+      <div class="sh"><span class="num">4</span><h3>Un-tie</h3></div>
+      <div class="row"><span class="lbl">Background noise inside lines</span>
+        <div class="seg" id="bgSeg"><button data-v="natural" class="on">Keep</button><button data-v="clean">To residual</button></div></div>
+      <div class="row"><button class="btn primary wide" id="untieBtn">Un-tie into stems</button></div>
+      <p class="hint">Where one character talks alone, their stem gets the original sound untouched. Only the overlaps are separated.</p>
+    </section>
+
+    <section class="step off" id="s5">
+      <div class="sh"><span class="num">5</span><h3>Export stems</h3></div>
+      <div class="row"><span class="lbl">Format</span>
+        <div class="seg" id="fmtSeg"><button data-v="pcm24" class="on">24-bit</button><button data-v="float32">32-bit float</button></div></div>
+      <div class="row"><label class="lbl"><input type="checkbox" id="resChk" checked> Include Residual stem (room tone, effects)</label></div>
+      <div class="row"><button class="btn primary wide" id="exportBtn">Export stems…</button></div>
+      <p class="hint">Same length and start as the source. In Pro Tools: import, then Spot ▸ Original Time Stamp.</p>
+    </section>
+  </aside>
+
+  <main>
+    <div class="transport">
+      <button class="play" id="playBtn" title="Play / pause (space)"><svg viewBox="0 0 14 14" id="playIco"><path d="M2 1l11 6-11 6z" fill="currentColor"/></svg></button>
+      <div><div class="tc" id="tc">00:00:00:00</div><div class="tcsub" id="tcsub">25 fps · source timecode</div></div>
+      <div class="listen" id="listen"></div>
+      <div class="spacer"></div>
+      <div class="zoom">
+        <select id="fpsSel" title="Timecode rate"><option>23.976</option><option>24</option><option selected>25</option><option>29.97</option><option>30</option></select>
+        <button class="btn small" id="zoomOut" title="Zoom out (−)">−</button>
+        <button class="btn small" id="zoomIn" title="Zoom in (+)">+</button>
+        <button class="btn small" id="zoomAll" title="Whole file">All</button>
+      </div>
+    </div>
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="empty" id="empty"><div class="drop"><h2>Open a mixed dialogue file</h2><p>Un-tie finds every character's voice, separates the overlaps, and gives you one stem per character that adds back up to the original.</p></div></div>
+    </div>
+    <div class="selbar" id="selbar">
+      <div class="selrow" id="selrow"><span class="t">Drag on the timeline to select a stretch. Click a lane name to listen to that stem.</span>
+        <span class="keys"><kbd>space</kbd> play · <kbd>Z</kbd> zoom to selection · <kbd>0</kbd>–<kbd>9</kbd> listen</span></div>
+      <div class="fixes" id="fixes"></div>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<audio id="au" preload="auto"></audio>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = async (path, body) => {
+  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  let j = {}; try { j = await r.json(); } catch(e) {}
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+};
+const pyapi = () => (window.pywebview && window.pywebview.api) || null;
+const b64 = (s, T) => { const b = atob(s); const a = new Uint8Array(b.length); for (let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return new T(a.buffer); };
+
+let S = null, wave = null, lanes = null, lanesVer = -1, fileKey = null;
+let view = {t0:0, t1:10}, sel = null, playT = 0, solo = 'orig', fps = 25;
+let overlapChoice = new Set();
+const au = $('#au');
+
+function toast(msg, err, actionLabel, action){
+  const t = $('#toast'); t.className = 'toast on' + (err?' err':'');
+  t.innerHTML = ''; const s = document.createElement('span'); s.textContent = msg; t.appendChild(s);
+  if (actionLabel){ const a = document.createElement('a'); a.textContent = actionLabel; a.onclick = action; t.appendChild(a); }
+  clearTimeout(t._h); t._h = setTimeout(()=> t.className='toast', err? 7000 : 4500);
+}
+
+// ---------- timecode
+function fmtTC(t){
+  const start = S && S.file ? S.file.start_seconds : 0;
+  let x = Math.max(0, t + start);
+  const nd = Math.round(fps);
+  let fr = Math.floor(x * fps + 1e-6);
+  const f = fr % nd; let s = Math.floor(fr / nd);
+  const h = Math.floor(s/3600) % 24, m = Math.floor(s/60)%60, ss = s%60;
+  const p = n => String(n).padStart(2,'0');
+  return `${p(h)}:${p(m)}:${p(ss)}:${p(f)}`;
+}
+function fmtS(t){ const m = Math.floor(t/60), s = t - m*60; return (m? m+':'+String(s.toFixed(2)).padStart(5,'0') : s.toFixed(2)+' s'); }
+
+// ---------- state polling
+async function refresh(){
+  try { S = await api('/api/state'); } catch(e){ return; }
+  render();
+  const key = S.file ? S.file.path + '|' + S.file.seconds : null;
+  if (key !== fileKey){ fileKey = key; wave = null; lanes = null; lanesVer = -1; sel = null; playT = 0; solo = 'orig';
+    if (key){ const w = await api('/api/wave'); wave = {min: b64(w.min, Int8Array), max: b64(w.max, Int8Array), ps: w.per_second};
+      view = {t0:0, t1:S.file.seconds}; setSrc(); } draw(); }
+  if (S.rendered && S.render_version !== lanesVer){
+    const l = await api('/api/lanes'); lanes = l.lanes.map(x => b64(x, Uint8Array)); lanesVer = l.version;
+    if (solo !== 'orig') setSrc(true); draw();
+  }
+  if (!S.rendered && lanes){ lanes = null; lanesVer = -1; if (solo!=='orig'){ solo='orig'; setSrc(); } draw(); }
+}
+let lastJob = null;
+async function tick(){
+  await refresh();
+  const j = S && S.job;
+  if (j && lastJob && lastJob.running && !j.running){
+    if (j.error) toast(j.error, true);
+    else if (lastJob.kind === 'analyse') toast(`Found ${S.chars.length} characters. Check them, then Un-tie.`);
+    else if (lastJob.kind === 'untie') toast('Stems are ready. Listen with the buttons above, fix anything on the timeline, then export.');
+    else if (lastJob.kind === 'export' && j.files) toast(`Exported ${j.files.length} files.`, false, 'Show in Finder', () => pyapi() && pyapi().reveal(j.files[0]));
+  }
+  lastJob = j;
+  setTimeout(tick, j && j.running ? 350 : 1500);
+}
+
+// ---------- side panel
+function setSeg(el, v){ el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v == v)); }
+function render(){
+  const f = S.file, busy = S.job.running;
+  $('#empty').style.display = f ? 'none' : '';
+  $('#fileinfo').innerHTML = f ? [
+    `<span class="chip"><b>${esc(f.name)}</b></span>`,
+    `<span class="chip">${(f.sr/1000).toFixed(f.sr%1000?1:0)} kHz · ${f.channels==1?'mono':f.channels==2?'stereo':f.channels+' ch'}</span>`,
+    `<span class="chip">${fmtS(f.seconds)}</span>`,
+    f.time_ref!=null ? `<span class="chip">starts ${fmtTC(0)}</span>` : ''].join('') : '';
+  $('#nullinfo').innerHTML = S.rendered && S.null_db!=null ? `Null test: stems + residual vs original <b>${S.null_db < -200 ? '−∞' : S.null_db.toFixed(0)} dB</b>` : '';
+  const on = (id, cond, done) => { $(id).classList.toggle('off', !cond); $(id).classList.toggle('done', !!done); };
+  on('#s1', !busy, !!f); on('#s2', f && !busy || S.job.kind==='analyse' && busy, S.analysed);
+  on('#s3', S.analysed && !busy, S.chars.length>0); on('#s4', S.analysed && S.chars.length>0 && !busy, S.rendered);
+  on('#s5', S.rendered && !busy, false);
+  setSeg($('#voicesSeg'), S.settings.voices); setSeg($('#bgSeg'), S.settings.bg);
+  $('#analyseBtn').textContent = S.analysed ? (S.analysed_voices != S.settings.voices ? 'Analyse again for ' + S.settings.voices + ' voices' : 'Analyse again') : 'Analyse';
+  $('#untieBtn').textContent = S.rendered ? 'Un-tie again' : 'Un-tie into stems';
+  // progress (shown in step 2 for long jobs, also used for un-tie/export)
+  const pr = $('#prog');
+  pr.classList.toggle('on', busy);
+  if (busy){ $('#pbar').style.width = S.job.pct.toFixed(1)+'%'; $('#pstage').textContent = S.job.stage;
+    $('#peta').textContent = S.job.eta!=null && S.job.eta>3 ? '~' + fmtEta(S.job.eta) + ' left' : '';
+    $('#pstop').style.display = ['analyse','untie'].includes(S.job.kind) ? '' : 'none';
+    if (S.job.kind !== 'analyse') $('#s2').classList.remove('off');
+  }
+  renderChars(); renderListen(); renderSel(); renderFixes();
+}
+function fmtEta(s){ s=Math.round(s); return s<60? s+' s' : Math.floor(s/60)+' min '+(s%60? (s%60)+' s':''); }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+let charsSig = '';
+function renderChars(){
+  const sig = JSON.stringify(S.chars) + (sel?1:0);
+  if (sig === charsSig) return; charsSig = sig;
+  const box = $('#chars'); box.innerHTML = '';
+  if (!S.chars.length){ box.innerHTML = '<p class="hint">Analyse first. Characters appear here.</p>'; return; }
+  S.chars.forEach(c => {
+    const d = document.createElement('div'); d.className = 'ch';
+    d.innerHTML = `<span class="sw" style="background:${c.color}"></span><input value="${esc(c.name)}" spellcheck="false"><button class="ico" title="More">⋯</button><div class="menu"></div>`;
+    const inp = d.querySelector('input');
+    inp.onchange = () => api('/api/chars/rename', {id:c.id, name:inp.value}).then(refresh).catch(e=>toast(e.message,true));
+    inp.onkeydown = e => { if (e.key==='Enter') inp.blur(); e.stopPropagation(); };
+    const m = d.querySelector('.menu');
+    let h = `<button data-a="sample" ${sel?'':'disabled style="opacity:.4"'}>Use selection as voice sample</button>`;
+    const others = S.chars.filter(o => o.id !== c.id);
+    if (others.length){ h += `<div class="sep"></div><div class="t">Same person as…</div>` + others.map(o => `<button data-a="merge" data-dst="${o.id}"><span class="sw" style="display:inline-block;background:${o.color};margin-right:7px"></span>${esc(o.name)}</button>`).join(''); }
+    h += `<div class="sep"></div><button data-a="delete">Remove character</button>`;
+    m.innerHTML = h;
+    d.querySelector('.ico').onclick = e => { e.stopPropagation(); document.querySelectorAll('.menu.on').forEach(x=>x!==m&&x.classList.remove('on')); m.classList.toggle('on'); };
+    m.onclick = async e => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return; m.classList.remove('on');
+      try {
+        if (b.dataset.a==='sample'){ if(!sel) return; await api('/api/chars/sample', {id:c.id, t0:sel.a, t1:sel.b}); toast(`New voice sample for ${c.name}. Click Un-tie again.`); }
+        if (b.dataset.a==='merge') await api('/api/chars/merge', {src:c.id, dst:+b.dataset.dst});
+        if (b.dataset.a==='delete') await api('/api/chars/delete', {id:c.id});
+        charsSig=''; refresh();
+      } catch(err){ toast(err.message, true); }
+    };
+    box.appendChild(d);
+  });
+}
+document.addEventListener('click', () => document.querySelectorAll('.menu.on').forEach(x=>x.classList.remove('on')));
+
+let listenSig = '';
+function renderListen(){
+  const items = [{k:'orig', name:'Original', color:'#9AA3AB'}];
+  if (S.rendered) S.stems.forEach((n,i) => items.push({k:String(i), name:n, color: i < S.chars.length ? S.chars[i].color : '#6C757D'}));
+  const sig = JSON.stringify(items) + solo;
+  if (sig === listenSig) return; listenSig = sig;
+  const box = $('#listen'); box.innerHTML = '<span class="t">Listen</span>';
+  items.forEach((it, n) => { const b = document.createElement('button'); b.className = 'pill' + (solo===it.k?' on':'');
+    b.title = 'Key ' + n; b.innerHTML = `<span class="sw" style="background:${it.color}"></span>${esc(it.name)}`;
+    b.onclick = () => setSolo(it.k); box.appendChild(b); });
+}
+
+let selSig = '';
+function renderSel(){
+  const sig = JSON.stringify([sel, S.rendered, S.chars, [...overlapChoice]]);
+  if (sig === selSig) return; selSig = sig;
+  const row = $('#selrow');
+  if (!sel){ row.innerHTML = `<span class="t">Drag on the timeline to select a stretch. Click a lane name to listen to that stem.</span><span class="keys"><kbd>space</kbd> play · <kbd>Z</kbd> zoom to selection · <kbd>0</kbd>–<kbd>9</kbd> listen</span>`; return; }
+  let h = `<span class="tt">${fmtTC(sel.a)} → ${fmtTC(sel.b)} · ${(sel.b-sel.a).toFixed(2)} s</span>
+    <button class="btn small" id="selPlay">▶ Play</button><button class="btn small" id="selZoom">Zoom</button>`;
+  if (S.rendered && S.chars.length){
+    h += `<span class="vsep"></span><span class="t">Only</span>` + S.chars.map(c => `<button class="chipbtn" data-assign="${c.id}"><span class="sw" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('') + `<span class="t">is talking</span>`;
+    if (S.chars.length > 1){
+      h += `<span class="vsep"></span><span class="t">Overlap of</span>` + S.chars.map(c => `<button class="chipbtn ${overlapChoice.has(c.id)?'on':''}" data-ov="${c.id}"><span class="sw" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('')
+        + `<button class="btn small" id="ovApply" ${overlapChoice.size<2?'disabled':''}>Separate</button>`;
+    }
+    h += `<span class="vsep"></span><button class="btn small" id="toRes">Nobody (to Residual)</button>`;
+  }
+  row.innerHTML = h;
+  $('#selPlay').onclick = () => playSel();
+  $('#selZoom').onclick = () => zoomSel();
+  row.querySelectorAll('[data-assign]').forEach(b => b.onclick = () => doEdit('assign', [+b.dataset.assign]));
+  row.querySelectorAll('[data-ov]').forEach(b => b.onclick = () => { const id=+b.dataset.ov; overlapChoice.has(id)?overlapChoice.delete(id):overlapChoice.add(id); renderSel(); });
+  if ($('#ovApply')) $('#ovApply').onclick = () => doEdit('overlap', [...overlapChoice]);
+  if ($('#toRes')) $('#toRes').onclick = () => doEdit('residual', []);
+}
+async function doEdit(kind, chars){
+  try { await api('/api/edit', {kind, t0:sel.a, t1:sel.b, chars}); overlapChoice.clear(); tick(); }
+  catch(e){ toast(e.message, true); }
+}
+let fixSig = '';
+function renderFixes(){
+  const sig = JSON.stringify(S.edits) + JSON.stringify(S.chars);
+  if (sig === fixSig) return; fixSig = sig;
+  const name = id => (S.chars.find(c=>c.id===id)||{name:'?'}).name;
+  $('#fixes').innerHTML = S.edits.map((e,i) => `<span class="fix">${fmtTC(e.t0)}–${fmtTC(e.t1)} ${e.kind==='assign'?'→ '+esc(name(e.chars[0])):e.kind==='overlap'?'overlap '+e.chars.map(c=>esc(name(c))).join(' + '):'→ Residual'}<button data-rm="${i}" title="Undo this fix">✕</button></span>`).join('');
+  $('#fixes').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => api('/api/edit/remove', {index:+b.dataset.rm}).then(tick).catch(e=>toast(e.message,true)));
+}
+
+// ---------- buttons
+$('#openBtn').onclick = async () => {
+  let path = null;
+  if (pyapi()) path = await pyapi().choose_file(); else path = prompt('Full path of the audio file');
+  if (!path) return;
+  try { au.pause(); await api('/api/open', {path}); tick(); } catch(e){ toast(e.message, true); }
+};
+const countOpts = '<option value="">Find for me</option>' + [...Array(11)].map((_,i)=>`<option value="${i+2}">${i+2}</option>`).join('');
+$('#countSel').innerHTML = countOpts;
+$('#refindSel').innerHTML = '<option value="">Find again…</option><option value="auto">Automatically</option>' + [...Array(11)].map((_,i)=>`<option value="${i+2}">${i+2} characters</option>`).join('');
+$('#refindSel').onchange = async e => { const v = e.target.value; e.target.value=''; if(!v) return;
+  try { await api('/api/find', {count: v==='auto'? null : +v}); charsSig=''; refresh(); toast('Characters found again. Click Un-tie.'); } catch(err){ toast(err.message, true); } };
+$('#voicesSeg').onclick = e => { const b = e.target.closest('button'); if (b) api('/api/settings', {voices:+b.dataset.v}).then(refresh); };
+$('#bgSeg').onclick = e => { const b = e.target.closest('button'); if (b) api('/api/settings', {bg:b.dataset.v}).then(refresh); };
+let fmt = 'pcm24';
+$('#fmtSeg').onclick = e => { const b = e.target.closest('button'); if (b){ fmt = b.dataset.v; setSeg($('#fmtSeg'), fmt); } };
+$('#analyseBtn').onclick = () => api('/api/analyse', {count: $('#countSel').value || null}).then(tick).catch(e=>toast(e.message,true));
+$('#untieBtn').onclick = () => api('/api/untie', {}).then(tick).catch(e=>toast(e.message,true));
+$('#pstop').onclick = () => api('/api/cancel', {});
+$('#newCharBtn').onclick = async () => {
+  if (!sel) return toast('First select a clean line of the new character on the timeline.', true);
+  try { await api('/api/chars/add', {t0:sel.a, t1:sel.b, name:''}); charsSig=''; refresh(); } catch(e){ toast(e.message, true); }
+};
+$('#exportBtn').onclick = async () => {
+  let folder = null;
+  if (pyapi()) folder = await pyapi().choose_folder(); else folder = prompt('Folder to export to');
+  if (!folder) return;
+  try { await api('/api/export', {folder, format: fmt, residual: $('#resChk').checked}); tick(); } catch(e){ toast(e.message, true); }
+};
+$('#fpsSel').onchange = e => { fps = parseFloat(e.target.value); selSig=fixSig=''; render(); draw(); };
+
+// ---------- playback
+function setSrc(keepPlaying){
+  if (!S || !S.file) return;
+  const wasPlaying = !au.paused, t = au.paused ? playT : au.currentTime;
+  au.src = '/api/audio/' + solo + '?v=' + (S.render_version||0) + '&f=' + encodeURIComponent(fileKey);
+  const go = () => { try { au.currentTime = t; } catch(e){} if (wasPlaying && keepPlaying !== false) au.play(); au.removeEventListener('loadedmetadata', go); };
+  au.addEventListener('loadedmetadata', go);
+  au.load();
+}
+function setSolo(k){ if (k !== 'orig' && !S.rendered) return; solo = k; listenSig=''; renderListen(); setSrc(true); draw(); }
+let stopAt = null;
+function togglePlay(){
+  if (!S || !S.file) return;
+  if (au.paused){ stopAt = null; if (sel && (playT < sel.a || playT >= sel.b)) playT = sel.a; au.currentTime = playT; au.play(); }
+  else au.pause();
+}
+function playSel(){ if (!sel) return; playT = sel.a; au.currentTime = sel.a; stopAt = sel.b; au.play(); }
+au.onplay = () => { $('#playIco').innerHTML = '<path d="M2 1h3.5v12H2zM8.5 1H12v12H8.5z" fill="currentColor"/>'; loop(); };
+au.onpause = () => { $('#playIco').innerHTML = '<path d="M2 1l11 6-11 6z" fill="currentColor"/>'; playT = au.currentTime; draw(); };
+function loop(){
+  if (au.paused) return;
+  playT = au.currentTime;
+  if (stopAt != null && playT >= stopAt){ au.pause(); playT = sel ? sel.a : stopAt; stopAt = null; }
+  const span = view.t1 - view.t0;
+  if (playT > view.t1 - span*0.02 && !drag){ view.t0 = playT - span*0.1; view.t1 = view.t0 + span; clampView(); }
+  draw(); requestAnimationFrame(loop);
+}
+$('#playBtn').onclick = togglePlay;
+
+// ---------- timeline
+const cv = $('#cv'), ctx = cv.getContext('2d');
+const GUT = 150, RULER = 26; let WAVE_H = 150, LANE_H = 46;
+function sizeCanvas(){ const r = cv.getBoundingClientRect(), d = window.devicePixelRatio||1; cv.width = r.width*d; cv.height = r.height*d; ctx.setTransform(d,0,0,d,0,0); draw(); }
+window.addEventListener('resize', sizeCanvas);
+const W = () => cv.getBoundingClientRect().width, H = () => cv.getBoundingClientRect().height;
+const t2x = t => GUT + (t - view.t0) / (view.t1 - view.t0) * (W() - GUT);
+const x2t = x => view.t0 + (x - GUT) / (W() - GUT) * (view.t1 - view.t0);
+function clampView(){
+  if (!S || !S.file) return; const dur = S.file.seconds; let span = Math.min(Math.max(view.t1 - view.t0, 0.25), dur);
+  view.t0 = Math.max(0, Math.min(view.t0, dur - span)); view.t1 = view.t0 + span;
+}
+function laneRows(){
+  if (!S || !S.rendered || !lanes) return [];
+  return S.stems.map((n,i) => ({i, name:n, color: i < S.chars.length ? S.chars[i].color : '#6C757D'}));
+}
+function layout(){
+  const h = H(), n = laneRows().length;
+  WAVE_H = Math.max(110, Math.min(220, Math.round(h * (n ? .28 : .55))));
+  LANE_H = n ? Math.max(38, Math.min(84, Math.floor((h - RULER - WAVE_H - 26) / n))) : 46;
+}
+function draw(){
+  const w = W(), h = H(); ctx.clearRect(0,0,w,h);
+  if (!S || !S.file || !wave) return;
+  layout();
+  const dur = S.file.seconds;
+  ctx.fillStyle = '#121518'; ctx.fillRect(0,0,GUT,h);
+  ctx.fillStyle = '#0B0D0F'; ctx.fillRect(GUT,0,w-GUT,RULER);
+  // ruler
+  const span = view.t1 - view.t0, px = (w-GUT)/span;
+  const steps = [1/fps, 2/fps, 5/fps, .5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  const st = steps.find(s => s*px > 90) || 1200;
+  ctx.font = '10.5px ' + getComputedStyle(document.body).getPropertyValue('--mono'); ctx.textBaseline='middle';
+  for (let t = Math.ceil(view.t0/st)*st; t < view.t1; t += st){
+    const x = t2x(t); ctx.fillStyle = '#2C3238'; ctx.fillRect(x, RULER-7, 1, 7); ctx.fillStyle = '#7C858D'; ctx.fillText(fmtTC(t), x+4, RULER/2);
+  }
+  // overlaps
+  const top = RULER, rows = laneRows(), totalH = WAVE_H + rows.length*LANE_H;
+  ctx.save(); ctx.beginPath(); ctx.rect(GUT, top, w-GUT, totalH); ctx.clip();
+  (S.overlaps||[]).forEach(([a,b]) => { if (b<view.t0||a>view.t1) return; const x0=t2x(a), x1=t2x(b);
+    ctx.fillStyle='rgba(242,169,59,.07)'; ctx.fillRect(x0, top, x1-x0, totalH); ctx.fillStyle='rgba(242,169,59,.55)'; ctx.fillRect(x0, top, x1-x0, 2); });
+  ctx.restore();
+  // waveform
+  const mid = top + WAVE_H/2, amp = WAVE_H/2 - 8;
+  ctx.fillStyle = solo==='orig' ? '#C9C3B8' : '#6F7882';
+  const n = wave.min.length, ps = wave.ps;
+  for (let x = GUT; x < w; x++){
+    const a = Math.floor(x2t(x)*ps), b = Math.max(a+1, Math.floor(x2t(x+1)*ps));
+    if (a >= n || b <= 0) continue;
+    let mn = 127, mx = -127; for (let i=Math.max(0,a); i<Math.min(n,b); i++){ if (wave.min[i]<mn) mn=wave.min[i]; if (wave.max[i]>mx) mx=wave.max[i]; }
+    if (mx < mn) continue; ctx.fillRect(x, mid - mx/127*amp, 1, Math.max(1,(mx-mn)/127*amp));
+  }
+  ctx.fillStyle = solo==='orig' ? '#E7E3DC' : '#8E959C'; ctx.font = '600 12px ' + getComputedStyle(document.body).fontFamily; ctx.fillText('Original mix', 14, top + 18);
+  ctx.fillStyle = '#5B636B'; ctx.font = '11px ' + getComputedStyle(document.body).fontFamily; ctx.fillText(S.rendered ? 'Click a name to listen' : '', 14, top + 36);
+  ctx.fillStyle = '#262B30'; ctx.fillRect(0, top+WAVE_H, w, 1);
+  // lanes
+  rows.forEach((r, k) => {
+    const y = top + WAVE_H + k*LANE_H, data = lanes[r.i], m = y + LANE_H/2;
+    if (solo === String(r.i)){ ctx.fillStyle = 'rgba(242,169,59,.08)'; ctx.fillRect(0, y, w, LANE_H); }
+    ctx.fillStyle = r.color; ctx.globalAlpha = .95;
+    for (let x = GUT; x < w; x++){
+      const a = Math.floor(x2t(x)*100), b = Math.max(a+1, Math.floor(x2t(x+1)*100)); if (a >= data.length || b<=0) continue;
+      let v = 0; for (let i=Math.max(0,a); i<Math.min(data.length,b); i++) if (data[i]>v) v = data[i];
+      const hh = (v/255) * (LANE_H/2 - 4); if (hh > .5) ctx.fillRect(x, m - hh, 1, hh*2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = r.color; ctx.fillRect(12, m-5, 10, 10);
+    ctx.fillStyle = solo===String(r.i) ? '#F2F0EC' : '#B5BCC2'; ctx.font = '600 12px ' + getComputedStyle(document.body).fontFamily;
+    ctx.fillText(r.name.length > 15 ? r.name.slice(0,14)+'…' : r.name, 30, m);
+    ctx.fillStyle = '#1E2327'; ctx.fillRect(0, y+LANE_H-1, w, 1);
+  });
+  // fixes on the ruler
+  (S.edits||[]).forEach(e => { const c = e.kind==='residual' ? '#6C757D' : ((S.chars.find(c=>c.id===e.chars[0])||{}).color||'#999');
+    ctx.fillStyle = c; ctx.fillRect(t2x(e.t0), RULER-3, Math.max(2, t2x(e.t1)-t2x(e.t0)), 3); });
+  // selection
+  if (sel){ const x0 = Math.max(GUT, t2x(sel.a)), x1 = t2x(sel.b); ctx.fillStyle = 'rgba(255,255,255,.10)'; ctx.fillRect(x0, top, x1-x0, totalH);
+    ctx.fillStyle='rgba(255,255,255,.5)'; ctx.fillRect(x0, top, 1, totalH); ctx.fillRect(x1, top, 1, totalH); }
+  // playhead
+  const px0 = t2x(playT); if (px0 >= GUT){ ctx.fillStyle = '#F2A93B'; ctx.fillRect(px0, 0, 1.5, top + totalH); }
+  $('#tc').textContent = fmtTC(playT);
+  // overview scrollbar
+  const sb = top + totalH + 10; if (sb + 8 < h){ ctx.fillStyle='#181C20'; ctx.fillRect(GUT, sb, w-GUT, 6);
+    ctx.fillStyle='#3A424A'; ctx.fillRect(GUT + view.t0/dur*(w-GUT), sb, Math.max(6, span/dur*(w-GUT)), 6); }
+}
+let drag = null;
+cv.addEventListener('mousedown', e => {
+  if (!S || !S.file) return; const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < GUT){ // lane names = listen buttons
+    if (y > RULER && y < RULER + WAVE_H) setSolo('orig');
+    const k = Math.floor((y - RULER - WAVE_H) / LANE_H), rows = laneRows(); if (y > RULER + WAVE_H && k >= 0 && k < rows.length) setSolo(String(rows[k].i));
+    return; }
+  const t = Math.max(0, Math.min(S.file.seconds, x2t(x)));
+  drag = {x0:x, t0:t, moved:false};
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return; const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+  if (Math.abs(x - drag.x0) > 3) drag.moved = true;
+  if (drag.moved){ const t = Math.max(0, Math.min(S.file.seconds, x2t(x))); sel = {a: Math.min(t, drag.t0), b: Math.max(t, drag.t0)}; draw(); }
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return;
+  if (!drag.moved){ sel = null; playT = drag.t0; if (!au.paused) au.currentTime = playT; }
+  else if (sel && sel.b - sel.a < 0.02) sel = null;
+  if (sel) playT = sel.a;
+  drag = null; charsSig=''; renderChars(); renderSel(); draw();
+});
+cv.addEventListener('wheel', e => {
+  if (!S || !S.file) return; e.preventDefault();
+  const r = cv.getBoundingClientRect(), tm = x2t(e.clientX - r.left), span = view.t1 - view.t0;
+  if (e.ctrlKey || e.metaKey || e.altKey){ const f = Math.exp(e.deltaY * 0.01); const ns = span * f;
+    view.t0 = tm - (tm - view.t0) * ns/span; view.t1 = view.t0 + ns; }
+  else { const d = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / (W()-GUT) * span; view.t0 += d; view.t1 += d; }
+  clampView(); draw();
+}, {passive:false});
+function zoomBy(f){ const c = (view.t0+view.t1)/2, s = (view.t1-view.t0)*f; view.t0 = c - s/2; view.t1 = c + s/2; clampView(); draw(); }
+function zoomSel(){ if (!sel) return; const pad = (sel.b-sel.a)*.15; view.t0 = sel.a - pad; view.t1 = sel.b + pad; clampView(); draw(); }
+$('#zoomIn').onclick = () => zoomBy(.5); $('#zoomOut').onclick = () => zoomBy(2);
+$('#zoomAll').onclick = () => { if (S && S.file){ view = {t0:0, t1:S.file.seconds}; draw(); } };
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space'){ e.preventDefault(); togglePlay(); }
+  else if (e.key === 'z' || e.key === 'Z') zoomSel();
+  else if (e.key === '+' || e.key === '=') zoomBy(.5);
+  else if (e.key === '-') zoomBy(2);
+  else if (e.key === 'Escape'){ sel = null; renderSel(); draw(); }
+  else if (/^[0-9]$/.test(e.key)){ const k = +e.key; if (k===0) setSolo('orig'); else if (S && S.rendered && k-1 < S.stems.length) setSolo(String(k-1)); }
+});
+new ResizeObserver(sizeCanvas).observe($('#stage'));
+sizeCanvas(); tick();
+</script>
+</body>
+</html>

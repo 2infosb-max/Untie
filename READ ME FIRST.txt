@@ -1,0 +1,37 @@
+UN-TIE by Sound Brewery
+Splits a mixed dialogue track into one stem per character.
+
+INSTALL (once)
+1. Double-click the Un-tie .dmg file.
+2. Drag Untie onto the Applications folder.
+3. First time only: open Untie from Applications. macOS will say it can't verify the app - click Done.
+   Then: Apple menu > System Settings > Privacy & Security, scroll down, click "Open Anyway", and confirm.
+   After that it opens normally.
+   (Use the "apple-silicon" .dmg on M1/M2/M3/M4 Macs and the "intel" .dmg on Intel Macs.)
+
+EVERY TIME YOU USE IT
+1. Click "Open audio file..." and pick the mixed dialogue (mono or stereo WAV/BWF/AIFF, any sample rate).
+2. Voices talking at the same time: leave on 2 (use 3 only for three-way crosstalk).
+   Characters in the scene: leave on "Find for me", or pick the number if you know it.
+   Click Analyse. This is the slow part - roughly 1 to 3 minutes per minute of dialogue.
+3. Check the characters and type their real names. If one person was split into two, use
+   ... > Same person as... to merge them. If two people were put together, drag over a clean line
+   of one of them on the timeline and click "+ New from selection".
+4. Click "Un-tie into stems". Use the Listen buttons (or keys 0-9) to hear each stem.
+5. Fix anything that's wrong: drag over the stretch on the timeline, then click
+   - a name under "Only ... is talking" (gives the whole stretch, untouched, to that person),
+   - two or more names under "Overlap of", then Separate (splits just those voices there),
+   - "Nobody" (sends it to the Residual stem).
+   Each fix appears at the bottom; click its x to undo it.
+6. Click "Export stems..." and pick a folder. You get one WAV per character, a Residual stem and a short report.
+   All stems are the same length and carry the source's timecode stamp. In Pro Tools, import them and
+   use Spot > Original Time Stamp, or line them up with the original.
+
+GOOD TO KNOW
+- Where a character talks alone, their stem is the original recording, untouched.
+- Only the overlaps are rebuilt, and they keep the full bandwidth of your recording.
+- All stems added together = the original exactly (the null test at the top right shows it).
+- Overlaps can never be 100% perfect: listen to them, and use the fixes above where needed.
+- Try it on the "Test scene" file in this disk image first (4 characters with overlaps).
+- Everything runs on your Mac. Nothing is uploaded.
+- Problems? Send the file Untie.log from your Library > Logs folder.

@@ -1,0 +1,6 @@
+# PyTorch is installed separately per Mac type (see .github/workflows/build-dmg.yml)
+numpy>=1.24
+scipy>=1.11
+soundfile>=0.12
+flask>=3
+pillow>=10

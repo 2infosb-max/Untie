@@ -1,0 +1,107 @@
+name: Build Mac .dmg
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Untie.dmg (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: apple-silicon, os: macos-15, torch: "torch==2.6.0 torchaudio==2.6.0", numpy: "numpy>=1.26,<2.3" }
+          - { arch: intel, os: macos-15-intel, torch: "torch==2.2.2 torchaudio==2.2.2", numpy: "numpy<2" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ${{ matrix.torch }} "${{ matrix.numpy }}"
+          python -m pip install -r requirements.txt "${{ matrix.numpy }}" pywebview pyinstaller
+          python -m pip install speechbrain==1.0.3 "huggingface_hub<0.26" "${{ matrix.numpy }}"
+      - name: Test the engine (stand-in separator)
+        run: python tests/engine_test.py
+      - name: Download and freeze the voice networks
+        run: python tools/export_models.py
+      - name: Make a test scene with real speech (4 characters, overlaps)
+        run: python tests/make_say_scene.py "$RUNNER_TEMP/scene"
+      - name: Un-tie the test scene with the real networks
+        run: |
+          UNTIE_SELFTEST="$RUNNER_TEMP/scene" python -c "from untie.desktop import main; main()" | tee selftest.txt
+          python tests/check_selftest.py selftest.txt
+      - name: Build Untie.app
+        run: ./packaging/build_app.sh
+      - name: Sign (ad-hoc) so macOS will run it
+        run: |
+          xattr -cr dist/Untie.app
+          codesign --force --deep --sign - dist/Untie.app
+          codesign --verify --deep --strict dist/Untie.app
+      - name: Test the finished app
+        run: |
+          UNTIE_SELFTEST="$RUNNER_TEMP/scene" dist/Untie.app/Contents/MacOS/Untie | tee selftest_app.txt
+          python tests/check_selftest.py selftest_app.txt
+      - name: Open the app like a user would
+        run: |
+          rm -f ~/Library/Logs/Untie.log ~/Library/Logs/Untie.url
+          open dist/Untie.app
+          for i in $(seq 1 60); do [ -f ~/Library/Logs/Untie.url ] && break; sleep 1; done
+          cat ~/Library/Logs/Untie.log || true
+          URL=$(cat ~/Library/Logs/Untie.url)
+          echo "page: $URL"
+          curl -s "$URL" | grep -q "<title>Un-tie</title>"
+          curl -s "${URL}api/state" | tee /dev/stderr | grep -q '"version"'
+          pkill -f "Untie.app/Contents/MacOS/Untie" || true
+      - name: Make the .dmg
+        run: |
+          V=$(python -c "import untie;print(untie.__version__)")
+          mkdir -p dmg
+          cp -R dist/Untie.app dmg/
+          ln -s /Applications dmg/Applications
+          cp "READ ME FIRST.txt" dmg/
+          mkdir -p "dmg/Test scene"
+          cp "$RUNNER_TEMP/scene/mix.wav" "dmg/Test scene/Test scene - 4 characters.wav"
+          hdiutil create -volname "Un-tie" -srcfolder dmg -ov -format UDZO "Untie-$V-mac-${{ matrix.arch }}.dmg"
+          ls -la *.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Untie-${{ matrix.arch }}
+          path: '*.dmg'
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-${{ matrix.arch }}
+          path: 'selftest*.txt'
+
+  release:
+    name: Publish release
+    needs: build
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, pattern: 'Untie-*', merge-multiple: true }
+      - name: Version
+        run: |
+          ls -la artifacts
+          test -n "$(ls artifacts/*.dmg 2>/dev/null)"
+          echo "TAG=v$(python3 -c "import untie;print(untie.__version__)")" >> "$GITHUB_ENV"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Un-tie ${{ env.TAG }}
+          files: artifacts/*.dmg
+          body_path: RELEASE_NOTES.md
+          make_latest: true
