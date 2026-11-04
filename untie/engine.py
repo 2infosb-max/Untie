@@ -242,6 +242,7 @@ class Project:
             if hasattr(M, "locate"):
                 M.locate(s)
             out = M.separate(seg * g, voices) / g
+            out = self._fit_to_mix(out, seg)
             wins = out[:, wst[:, None] + np.arange(WIN16)[None, :]]          # (v, nW, WIN)
             wdb = db((wins.astype(np.float64) ** 2).mean(2))
             emb = M.embed(wins.reshape(-1, WIN16)).reshape(out.shape[0], len(wst), -1)
@@ -264,6 +265,25 @@ class Project:
             self.analysed_voices = voices
             self.rendered = False
         progress(100, "Analysed", 0)
+
+    @staticmethod
+    def _fit_to_mix(out, seg):
+        """The network's voices come out at an arbitrary level and polarity. Scale (and flip) them so
+        together they rebuild the mix, in overlapping 1 s pieces so it follows level changes."""
+        nv, L = out.shape
+        win, hop = 16000, 8000
+        res = np.zeros_like(out)
+        wsum = np.zeros(L, np.float32)
+        h = np.hanning(win).astype(np.float32)
+        for a in range(0, max(1, L - win + hop), hop):
+            b = min(L, a + win)
+            w = h[:b - a] if b - a == win else np.hanning(b - a).astype(np.float32)
+            A = out[:, a:b].T.astype(np.float64)
+            reg = 1e-6 * (A ** 2).sum() / max(1, nv) + 1e-12
+            gains = np.linalg.solve(A.T @ A + reg * np.eye(nv), A.T @ seg[a:b].astype(np.float64))
+            res[:, a:b] += (gains[:, None] * out[:, a:b]) * w[None]
+            wsum[a:b] += w
+        return res / np.maximum(wsum, 1e-3)[None]
 
     def _windows(self, rel_db=30.0):
         """All voice-identity windows that carry real voice: (embeddings, chunk, output, window)."""
@@ -417,6 +437,31 @@ class Project:
             out.append(np.max(np.stack([emb @ v for v in vs]), 0))
         return np.stack(out, -1)
 
+    DISTINCT = False
+    MASK_POWER = 1.0
+    ISLAND_MIX = 0.0          # how much a whole stretch of talking decides its own label
+
+    def _island_scores(self, out, sc, valid, wst, wdb, curves):
+        """A separated voice that talks without a break is one person: judge each unbroken stretch
+        as a whole (all its windows together), so single unclear words don't flip to someone else."""
+        nv, K, nfr = curves.shape
+        res = curves.copy()
+        wa = wst // HOP16
+        wb = (wst + WIN16) // HOP16
+        for i in range(nv):
+            fe = db(frame_energy(out[i], nfr, HOP16))
+            act = fe > max(fe.max() - 30, self.floor_db + 3)
+            act = drop_short(fill_gaps(act, 25), 5)
+            for a, b in runs(act):
+                ov = np.minimum(wb, b) - np.maximum(wa, a)                  # frames of overlap
+                m = (ov > 0) & valid[i]
+                if not m.any():
+                    continue
+                w = (ov[m] / (wb[m] - wa[m])) * 10 ** (wdb[i, m] / 10)
+                mean = (sc[i, m] * w[:, None]).sum(0) / w.sum()
+                res[i, :, a:b] = self.ISLAND_MIX * mean[:, None] + (1 - self.ISLAND_MIX) * curves[i, :, a:b]
+        return res
+
     def assign(self, progress=lambda *a: None):
         K = len(self.chars)
         if K < 1:
@@ -444,8 +489,9 @@ class Project:
                     curves[i] = sc[i].mean(0)[:, None]
                 else:
                     curves[i] = np.stack([np.interp(fr, centers[v], sc[i, v, j]) for j in range(K)])
+            curves = self._island_scores(out, sc, valid, c["wst"], c["wdb"], curves)
             labs = curves.argmax(1)                                          # (v, nfr)
-            if nv > 1 and K > 1:
+            if self.DISTINCT and nv > 1 and K > 1:
                 # two voices the network pulled apart at the same moment are two different people
                 fe = db(np.stack([frame_energy(out[i], nfr, HOP16) for i in range(nv)]))
                 act = fe > max(fe.max() - 30, self.floor_db + 3)
@@ -532,6 +578,8 @@ class Project:
         estp = self._estp
         P = np.abs(np.fft.rfft(estp[:, idx] * self.win16, axis=-1)) ** 2               # (K,B,321)
         P *= self.allow[:, j0:j1, None]
+        if self.MASK_POWER != 1.0:
+            P = P ** self.MASK_POWER
         hard = self.hard[:, j0:j1]
         S = P.sum(0)
         tiny = 1e-12

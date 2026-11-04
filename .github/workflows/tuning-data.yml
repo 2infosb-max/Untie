@@ -18,11 +18,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install torch==2.6.0 torchaudio==2.6.0 -r requirements.txt speechbrain==1.0.3 "huggingface_hub<0.26"
+          python -m pip install clearvoice "huggingface_hub<0.26" "numpy<2" || python -m pip install clearvoice "numpy<2"
       - name: Freeze networks and make scenes
         run: |
           python tools/export_models.py
           python tests/make_say_scene.py out/scene
           say -v '?' > out/voices.txt
+          python tools/try_mossformer.py out/scene out/moss 2>&1 | tee out/try.txt || true
+          for f in out/moss/*.pt; do [ -f "$f" ] && split -b 45m "$f" "$f.part." && rm "$f"; done
           mkdir -p out/models && cp untie/models/meta.json out/models/
           for f in untie/models/*.pt; do split -b 45m "$f" "out/models/$(basename $f).part."; done
       - name: Push to the tuning-data branch
