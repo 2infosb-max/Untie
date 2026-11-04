@@ -121,7 +121,9 @@ class Project:
         self.null_db = None
         self.null_db_24 = None
         self.est = None
-        self.settings = {"voices": 2, "bg": "natural"}
+        self.settings = {"voices": 2, "bg": "natural", "thorough": False}
+        self.mix_win = None
+        self.separated_share = None
         self.analysed_voices = None
         self.lane_energy = None
 
@@ -210,9 +212,18 @@ class Project:
         L = M.chunk_len16(voices)
         ov = int(OVERLAP_S * SR16)
         step = L - ov
-        # stretches to separate: talking plus 0.3 s either side
-        reg = dilate(self.speech_raw, 30, 30)
-        reg = fill_gaps(reg, 50)
+        talk = fill_gaps(dilate(self.speech_raw, 30, 30), 50)
+        if not talk.any():
+            raise ValueError("No dialogue was found in this file.")
+        # quick pass: a voice print of the original mix every 0.25 s
+        progress(2, "Listening to the voices", None)
+        self._mix_pass(M, talk, progress, cancel)
+        if self.settings.get("thorough"):
+            reg = talk
+        else:
+            # only where it isn't clearly one known voice does the slow separation run
+            reg = self._unclear_regions(talk)
+        self.separated_share = float(reg.sum() / max(1, talk.sum()))
         starts = []
         for a, b in runs(reg):
             a16, b16 = a * HOP16, b * HOP16
@@ -226,8 +237,6 @@ class Project:
                     if s + L >= b16:
                         break
                     s = min(s + step, b16 - L)
-        if not starts:
-            raise ValueError("No dialogue was found in this file.")
         chunks = []
         t0 = time.time()
         for ci, (s, a16, b16) in enumerate(starts):
@@ -243,7 +252,7 @@ class Project:
             chunks.append(self._separate_piece(M, s, L, voices, w))
             done = ci + 1
             el = time.time() - t0
-            progress(5 + 75 * done / len(starts), "Separating voices (%d of %d)" % (done, len(starts)),
+            progress(20 + 75 * done / len(starts), "Separating overlapping voices (%d of %d)" % (done, len(starts)),
                      el / done * (len(starts) - done) * 1.15)
         # second pass: every overlap again, centred in its own piece so the network hears both
         # voices with the most context and no third person
@@ -266,6 +275,73 @@ class Project:
             self.analysed_voices = voices
             self.rendered = False
         progress(100, "Analysed", 0)
+
+    UNCLEAR_TOP = 0.5          # mix voice print less like any character than this = unclear
+    UNCLEAR_MARGIN = 0.2       # ...or this close to two characters = unclear
+
+    def _mix_pass(self, M, talk, progress, cancel):
+        st = []
+        for a, b in runs(talk):
+            a16, b16 = a * HOP16, b * HOP16
+            st += list(range(max(0, a16 - WIN16 // 2), max(a16 + 1, min(self.L16 - WIN16, b16 - WIN16 // 2)), WSTEP16))
+        st = np.array(sorted(set(st)), int)
+        W = self.mono16[st[:, None] + np.arange(WIN16)[None, :]].astype(np.float32)
+        E = np.zeros((len(st), 0), np.float32)
+        parts = []
+        for i in range(0, len(st), 256):
+            if cancel():
+                raise Cancelled()
+            parts.append(M.embed(W[i:i + 256]))
+            progress(2 + 16 * min(1, (i + 256) / len(st)), "Listening to the voices", None)
+        E = np.concatenate(parts) if parts else E
+        self.mix_win = {"st": st, "emb": E.astype(np.float32),
+                        "db": db((W.astype(np.float64) ** 2).mean(1))}
+
+    def _mix_segments(self):
+        """~1.5 s stretches of the mix whose voice prints agree with each other: one person alone."""
+        mw = getattr(self, "mix_win", None)
+        if mw is None or len(mw["st"]) == 0:
+            return np.zeros((0, 1), np.float32), np.zeros(0)
+        st, E, d = mw["st"], mw["emb"], mw["db"]
+        ok = d > self.floor_db + 6
+        E_, Wt = [], []
+        brk = np.concatenate([[0], np.nonzero(np.diff(st) != WSTEP16)[0] + 1, [len(st)]])
+        for a, b in zip(brk[:-1], brk[1:]):
+            for q in range(a, b, 3):
+                r = np.arange(q, min(b, q + 6))
+                r = r[ok[r]]
+                if len(r) < 4:
+                    continue
+                v = E[r].mean(0)
+                v /= np.linalg.norm(v) + 1e-9
+                if (E[r] @ v).mean() > 0.6:
+                    E_.append(v)
+                    Wt.append(len(r))
+        if not E_:
+            return np.zeros((0, 1), np.float32), np.zeros(0)
+        return np.stack(E_), np.array(Wt, float)
+
+    def _unclear_regions(self, talk):
+        """Talking frames whose mix voice print isn't clearly one of the voices in the file."""
+        mw = self.mix_win
+        E, _ = self._mix_segments()
+        if len(E) < 4:
+            return talk
+        Z = linkage(E, method="average", metric="cosine")
+        lab = fcluster(Z, t=self.CLUSTER_DIST * 0.9, criterion="distance")   # err towards more voices
+        C = np.stack([E[lab == c].mean(0) for c in np.unique(lab)])
+        C /= np.linalg.norm(C, axis=1, keepdims=True) + 1e-9
+        S = mw["emb"] @ C.T
+        srt = np.sort(S, 1)
+        top = srt[:, -1]
+        margin = srt[:, -1] - srt[:, -2] if S.shape[1] > 1 else np.ones(len(S))
+        loud = mw["db"] > self.floor_db + 6
+        flag = loud & ((top < self.UNCLEAR_TOP) | (margin < self.UNCLEAR_MARGIN))
+        mark = np.zeros(self.nF, bool)
+        for a16 in mw["st"][flag]:
+            f = a16 // HOP16
+            mark[max(0, f - 25):min(self.nF, f + 125)] = True                 # the window +- 0.25 s
+        return fill_gaps(mark & talk, 100) & talk
 
     REFINE_WEIGHT = 4.0
     REFINE_OVERLAPS = False    # tested: no gain on the reference scene for +50% time
@@ -332,7 +408,7 @@ class Project:
         return res / np.maximum(wsum, 1e-3)[None]
 
     SOLO_DB = 9.0              # one separated voice this much louder than the other = one person talking
-    CLUSTER_DIST = 0.50        # voice-print distance that splits two characters (auto count)
+    CLUSTER_DIST = 0.55        # voice-print distance that splits two characters (auto count)
 
     @staticmethod
     def _mix_info(seg, wdb, wst, M):
@@ -382,7 +458,9 @@ class Project:
 
     # ------------------------------------------------------------------ 3. characters
     def find_characters(self, k=None):
-        E, Wt = self._segments()
+        E, Wt = self._mix_segments()
+        if len(E) < 4:
+            E, Wt = self._segments()
         if len(E) < 4:                                     # hardly any solo lines: use separated voices
             E, _ = self._windows(20.0)
             Wt = np.ones(len(E))
@@ -617,6 +695,20 @@ class Project:
             if n % 20 == 0:
                 progress(5 + 25 * n / max(1, len(self.chunks)), "Matching voices to characters", None)
         est /= np.maximum(den, 1e-6)[None, :]
+        mw = getattr(self, "mix_win", None)
+        if mw is not None and len(mw["st"]):
+            # talking that wasn't separated (one clear voice): whole mix to that character
+            u = np.clip(den, 0, 1)
+            sc = self._scores(mw["emb"])                                    # (n, K)
+            centers = (mw["st"] + WIN16 / 2) / HOP16
+            fr = np.arange(self.nF) + 0.5
+            curves = np.stack([np.interp(fr, centers, sc[:, j]) for j in range(K)])
+            lab = majority(curves.argmax(0), K, 15) if K > 1 else np.zeros(self.nF, int)
+            oh = np.zeros((K, self.nF), np.float32)
+            oh[lab, np.arange(self.nF)] = 1
+            oh = uniform_filter1d(oh, 3, axis=1, mode="nearest")
+            A = np.repeat(oh, HOP16, axis=1)[:, :self.L16]
+            est = est * u[None] + A * (self.mono16 * (1 - u))[None]
         self.est = est
         self.E = np.stack([frame_energy(est[j], self.nF, HOP16) for j in range(K)])
         self.char_ids = [c["id"] for c in self.chars]

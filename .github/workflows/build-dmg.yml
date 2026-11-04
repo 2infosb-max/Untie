@@ -43,14 +43,6 @@ jobs:
           cat untie/models/meta.json
       - name: Make a test scene with real speech (4 characters, overlaps)
         run: python tests/make_say_scene.py "$RUNNER_TEMP/scene"
-      - name: Keep the frozen networks and test scene (for tuning)
-        uses: actions/upload-artifact@v4
-        with:
-          name: tuning-${{ matrix.arch }}
-          path: |
-            untie/models
-            ${{ runner.temp }}/scene
-          retention-days: 7
       - name: Un-tie the test scene with the real networks
         run: |
           UNTIE_SELFTEST="$RUNNER_TEMP/scene" python -c "from untie.desktop import main; main()" | tee selftest.txt

@@ -4,7 +4,7 @@ Mac app that recovers per-character dialogue stems from a mixed mono/stereo dial
 
 ## How it works
 
-1. **Voice activity** finds every stretch of talking.
+1. **Voice activity** finds every stretch of talking, and a voice print of the mix is taken every 0.25 s. Only stretches that aren't clearly one known voice (overlaps, unclear) go through the slow separation; the option *Separate every line* runs it everywhere.
 2. **Separation**: a MossFormer2 network (ClearerVoice-Studio, 16 kHz) splits each 4 s piece into 2 voices; the voices are scaled and polarity-matched so together they rebuild the mix.
 3. **Who is who**: an ECAPA-TDNN speaker-identity network fingerprints the voices every 0.25 s - from the original mix where one person talks alone (cleaner), from the separated voices in overlaps. Characters are found by clustering ~2 s solo stretches. Two separated voices talking at once with different fingerprints always go to two different characters.
 4. **Decision every 10 ms**: silence, one character alone, or an overlap.

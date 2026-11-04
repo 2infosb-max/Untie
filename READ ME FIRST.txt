@@ -12,8 +12,9 @@ INSTALL (once)
 EVERY TIME YOU USE IT
 1. Click "Open audio file..." and pick the mixed dialogue (mono or stereo WAV/BWF/AIFF, any sample rate).
 2. Characters in the scene: leave on "Find for me", or pick the number if you know it.
-   Click Analyse. This is the slow part: about 1-2 minutes per minute of dialogue on an
-   Apple-silicon Mac, several times longer on an Intel Mac.
+   Click Analyse. Un-tie first learns every voice, then runs the slow separation only where voices
+   overlap or are unclear - so a scene with a lot of crosstalk takes longer than a calm one.
+   Tick "Separate every line" only for nonstop crosstalk (much slower).
 3. Check the characters and type their real names. If one person was split into two, use
    ... > Same person as... to merge them. If two people were put together, drag over a clean line
    of one of them on the timeline and click "+ New from selection".

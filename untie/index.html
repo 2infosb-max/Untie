@@ -128,11 +128,12 @@ canvas{display:block;width:100%;height:100%;cursor:text}
 
     <section class="step off" id="s2">
       <div class="sh"><span class="num">2</span><h3>Analyse voices</h3></div>
+      <div class="row"><label class="lbl"><input type="checkbox" id="thoroughChk"> Separate every line (much slower; for nonstop crosstalk)</label></div>
       <div class="row"><span class="lbl">Characters in the scene</span>
         <select id="countSel"><option value="">Find for me</option></select></div>
       <div class="row"><button class="btn primary wide" id="analyseBtn">Analyse</button></div>
       <div class="prog" id="prog"><div class="bar"><i id="pbar"></i></div><div class="pinfo"><span id="pstage"></span><span><span id="peta"></span> <a id="pstop">Stop</a></span></div></div>
-      <p class="hint">The slow step: the separation network listens to every line. Leave it running; you can stop it any time.</p>
+      <p class="hint" id="anHint">Un-tie first learns every voice, then runs the slow separation only where voices overlap or are unclear.</p>
     </section>
 
     <section class="step off" id="s3">
@@ -275,6 +276,8 @@ function render(){
   on('#s5', S.rendered && !busy, false);
   setSeg($('#bgSeg'), S.settings.bg);
   $('#analyseBtn').textContent = S.analysed ? 'Analyse again' : 'Analyse';
+  $('#thoroughChk').checked = !!S.settings.thorough;
+  if (S.analysed && S.separated_share != null) $('#anHint').textContent = `Separated ${Math.round(S.separated_share*100)}% of the talking (overlaps and unclear voices); the rest is one clear voice at a time.`;
   $('#untieBtn').textContent = S.rendered ? 'Un-tie again' : 'Un-tie into stems';
   // progress (shown in step 2 for long jobs, also used for un-tie/export)
   const pr = $('#prog');
@@ -386,6 +389,7 @@ $('#refindSel').onchange = async e => { const v = e.target.value; e.target.value
 $('#bgSeg').onclick = e => { const b = e.target.closest('button'); if (b) api('/api/settings', {bg:b.dataset.v}).then(refresh); };
 let fmt = 'pcm24';
 $('#fmtSeg').onclick = e => { const b = e.target.closest('button'); if (b){ fmt = b.dataset.v; setSeg($('#fmtSeg'), fmt); } };
+$('#thoroughChk').onchange = e => api('/api/settings', {thorough: e.target.checked}).then(refresh);
 $('#analyseBtn').onclick = () => api('/api/analyse', {count: $('#countSel').value || null}).then(tick).catch(e=>toast(e.message,true));
 $('#untieBtn').onclick = () => api('/api/untie', {}).then(tick).catch(e=>toast(e.message,true));
 $('#pstop').onclick = () => api('/api/cancel', {});

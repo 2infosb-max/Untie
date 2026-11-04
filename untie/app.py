@@ -93,7 +93,8 @@ def state():
                    chars=chars_json(), settings=P.settings, rendered=P.rendered,
                    render_version=P.render_version, edits=P.edits,
                    null_db=P.null_db, null_db_24=P.null_db_24,
-                   overlaps=P.overlaps(), stems=P.stem_names() if P.rendered else [])
+                   overlaps=P.overlaps(), stems=P.stem_names() if P.rendered else [],
+                   separated_share=P.separated_share)
 
 
 @app.post("/api/open")
@@ -129,6 +130,8 @@ def settings():
     d = request.get_json(silent=True) or {}
     if "voices" in d and int(d["voices"]) == 2:
         P.settings["voices"] = int(d["voices"])
+    if "thorough" in d:
+        P.settings["thorough"] = bool(d["thorough"])
     if d.get("bg") in ("natural", "clean"):
         if P.settings["bg"] != d["bg"]:
             P.settings["bg"] = d["bg"]
