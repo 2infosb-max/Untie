@@ -23,7 +23,8 @@ jobs:
           python tools/export_models.py
           python tests/make_say_scene.py out/scene
           say -v '?' > out/voices.txt
-          mkdir -p out/models && cp untie/models/* out/models/
+          mkdir -p out/models && cp untie/models/meta.json out/models/
+          for f in untie/models/*.pt; do split -b 45m "$f" "out/models/$(basename $f).part."; done
       - name: Push to the tuning-data branch
         run: |
           cd out
