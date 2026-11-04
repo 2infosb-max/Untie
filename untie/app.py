@@ -214,9 +214,21 @@ def export():
     res = {}
 
     def fn(prog):
-        res["files"] = P.export(folder, d.get("format", "pcm24"), bool(d.get("residual", True)), prog)
+        res["files"] = P.export(folder, d.get("format", "pcm24"), bool(d.get("residual", True)), prog,
+                                wavs=bool(d.get("wavs", True)), aaf=bool(d.get("aaf", False)),
+                                start_tc=(d.get("start_tc") or None), fps=float(d.get("fps", 25)),
+                                guide=bool(d.get("guide", True)))
         JOB["files"] = res["files"]
     return run_job("export", fn)
+
+
+@app.get("/api/default_tc")
+def default_tc():
+    from .aaf_export import default_start_tc
+    fps = float(request.args.get("fps", 25))
+    if P.x is None:
+        return jsonify(tc="01:00:00:00")
+    return jsonify(tc=default_start_tc(P.time_ref, P.sr, fps)[0], stamped=P.time_ref is not None)
 
 
 @app.get("/api/audio/<which>")

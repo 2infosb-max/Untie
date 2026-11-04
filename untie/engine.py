@@ -699,9 +699,13 @@ class Project:
         self.render(progress, frames=(int(t0 * FPS) - 60, int(math.ceil(t1 * FPS)) + 60))
 
     # ------------------------------------------------------------------ 7. export
-    def export(self, folder, fmt="pcm24", residual=True, progress=lambda *a: None):
+    def export(self, folder, fmt="pcm24", residual=True, progress=lambda *a: None,
+               wavs=True, aaf=False, start_tc=None, fps=25.0, guide=True):
+        """Writes WAV stems and/or a Pro Tools AAF (all stems as tracks, audio embedded)."""
         if not self.rendered:
             raise ValueError("Un-tie the file first.")
+        if not wavs and not aaf:
+            raise ValueError("Choose WAV stems, an AAF, or both.")
         base = os.path.splitext(os.path.basename(self.path))[0]
         names = self.stem_names()
         safe = []
@@ -710,25 +714,47 @@ class Project:
             while s in safe:
                 s += "_2"
             safe.append(s)
-        outs = [os.path.join(folder, "%s_UNTIE_%s.wav" % (base, s)) for s in safe]
-        if fmt == "float32":
-            self.render(progress, out_paths=outs, fmt="float32")
-        else:
-            import shutil
-            for i, (src, dst) in enumerate(zip(self.stem_paths(), outs)):
-                shutil.copyfile(src, dst)
-                progress(100 * (i + 1) / len(outs), "Exporting", None)
-        if not residual:
-            os.remove(outs[-1])
-            outs = outs[:-1]
+        outs = []
+        if wavs:
+            outs = [os.path.join(folder, "%s_UNTIE_%s.wav" % (base, s)) for s in safe]
+            wav_share = 50 if aaf else 100
+            prog = (lambda p, m, e: progress(p * wav_share / 100, "Exporting stems", None))
+            if fmt == "float32":
+                self.render(prog, out_paths=outs, fmt="float32")
+            else:
+                import shutil
+                for i, (src, dst) in enumerate(zip(self.stem_paths(), outs)):
+                    shutil.copyfile(src, dst)
+                    prog(100 * (i + 1) / len(outs), "", None)
+            if not residual:
+                os.remove(outs[-1])
+                outs = outs[:-1]
+        if aaf:
+            from . import aaf_export
+            tc, lead = aaf_export.default_start_tc(self.time_ref, self.sr, fps)
+            if start_tc and start_tc.strip() != tc:
+                tc, lead = start_tc.strip(), 0          # the user typed their own start
+            tracks = [(n, p) for n, p in zip(names, self.stem_paths())]
+            if not residual:
+                tracks = tracks[:-1]
+            if guide:
+                tracks.append(("Original mix", self.orig_preview))
+            path = os.path.join(folder, "%s_UNTIE.aaf" % base)
+            off = 50 if wavs else 0
+            aaf_export.write_aaf(path, base + " UNTIE", tracks, self.sr, tc, fps,
+                                 lambda p, m, e: progress(off + p * (100 - off) / 100, m, None), lead=lead)
+            outs.append(path)
+            self.aaf_tc = tc
         rep = os.path.join(folder, "%s_UNTIE_report.txt" % base)
         with open(rep, "w") as f:
             f.write("Un-tie by Sound Brewery\nSource: %s\n" % self.path)
             f.write("Sample rate: %d Hz, %d channel(s), %.3f s\n" % (self.sr, self.C, self.N / self.sr))
             if self.time_ref is not None:
                 f.write("Timecode stamp kept from the source (%d samples since midnight)\n" % self.time_ref)
+            if aaf:
+                f.write("AAF starts at %s (%s fps); stereo stems are L/R mono track pairs\n" % (tc, fps))
             f.write("Null test (all stems + residual vs original): %.1f dB\n" % (self.null_db or -999))
-            f.write("Fixes applied: %d\n\nStems:\n" % len(self.edits))
+            f.write("Fixes applied: %d\n\nFiles:\n" % len(self.edits))
             for p in outs:
                 f.write("  " + os.path.basename(p) + "\n")
         return outs

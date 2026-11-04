@@ -48,6 +48,7 @@ def run(folder, voices=2):
     print("SELFTEST characters_found=%d expected=%d" % (found, len(truths)))
     print("SELFTEST stem_SDR=%s mixture_SDR=%s improvement=%s" % (best, base, gain))
     print("SELFTEST null_db=%.1f" % p.null_db)
-    outs = p.export(tempfile.mkdtemp())
+    outs = p.export(tempfile.mkdtemp(), aaf=True)
+    assert any(o.endswith(".aaf") for o in outs)
     print("SELFTEST exported", [os.path.basename(o) for o in outs])
     return {"found": found, "expected": len(truths), "sdr": best, "gain": gain, "null_db": p.null_db}

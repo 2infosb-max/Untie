@@ -104,6 +104,8 @@ canvas{display:block;width:100%;height:100%;cursor:text}
 .toast.on{opacity:1;transform:translateX(-50%);pointer-events:auto}
 .toast.err{border-color:#6b2f28}
 .toast a{color:var(--amber);cursor:pointer;white-space:nowrap}
+.tcin{width:118px;background:#111417;border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font:12.5px var(--mono);text-align:center}
+.tcin.bad{border-color:var(--bad)}
 .keys{color:var(--faint);font-size:11px;margin-left:auto}
 .keys kbd{font:10.5px var(--mono);border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--dim)}
 </style>
@@ -152,12 +154,18 @@ canvas{display:block;width:100%;height:100%;cursor:text}
     </section>
 
     <section class="step off" id="s5">
-      <div class="sh"><span class="num">5</span><h3>Export stems</h3></div>
-      <div class="row"><span class="lbl">Format</span>
+      <div class="sh"><span class="num">5</span><h3>Export</h3></div>
+      <div class="row"><label class="lbl"><input type="checkbox" id="wavChk" checked> WAV stems</label>
         <div class="seg" id="fmtSeg"><button data-v="pcm24" class="on">24-bit</button><button data-v="float32">32-bit float</button></div></div>
+      <div class="row"><label class="lbl"><input type="checkbox" id="aafChk" checked> Pro Tools AAF (all stems as tracks)</label></div>
+      <div id="aafOpts">
+        <div class="row"><span class="lbl">AAF start timecode</span><input id="tcIn" class="tcin" value="01:00:00:00" spellcheck="false"></div>
+        <div class="row"><span class="lbl">Timecode rate</span><select id="fpsSel2"><option>23.976</option><option>24</option><option selected>25</option><option>29.97</option><option>30</option></select></div>
+        <div class="row"><label class="lbl"><input type="checkbox" id="guideChk" checked> Add the original mix as a guide track</label></div>
+      </div>
       <div class="row"><label class="lbl"><input type="checkbox" id="resChk" checked> Include Residual stem (room tone, effects)</label></div>
-      <div class="row"><button class="btn primary wide" id="exportBtn">Export stems…</button></div>
-      <p class="hint">Same length and start as the source. In Pro Tools: import, then Spot ▸ Original Time Stamp.</p>
+      <div class="row"><button class="btn primary wide" id="exportBtn">Export…</button></div>
+      <p class="hint" id="tcHint">WAVs keep the source's timecode stamp (Spot ▸ Original Time Stamp). The AAF opens in Pro Tools with File ▸ Import ▸ Session Data, every stem on its own track at the start timecode.</p>
     </section>
   </aside>
 
@@ -231,7 +239,7 @@ async function refresh(){
   const key = S.file ? S.file.path + '|' + S.file.seconds : null;
   if (key !== fileKey){ fileKey = key; wave = null; lanes = null; lanesVer = -1; sel = null; playT = 0; solo = 'orig';
     if (key){ const w = await api('/api/wave'); wave = {min: b64(w.min, Int8Array), max: b64(w.max, Int8Array), ps: w.per_second};
-      view = {t0:0, t1:S.file.seconds}; setSrc(); } draw(); }
+      view = {t0:0, t1:S.file.seconds}; setSrc(); tcTouched=false; fillTC(); } draw(); }
   if (S.rendered && S.render_version !== lanesVer){
     const l = await api('/api/lanes'); lanes = l.lanes.map(x => b64(x, Uint8Array)); lanesVer = l.version;
     if (solo !== 'orig') setSrc(true); draw();
@@ -246,7 +254,7 @@ async function tick(){
     if (j.error) toast(j.error, true);
     else if (lastJob.kind === 'analyse') toast(`Found ${S.chars.length} characters. Check them, then Un-tie.`);
     else if (lastJob.kind === 'untie') toast('Stems are ready. Listen with the buttons above, fix anything on the timeline, then export.');
-    else if (lastJob.kind === 'export' && j.files) toast(`Exported ${j.files.length} files.`, false, 'Show in Finder', () => pyapi() && pyapi().reveal(j.files[0]));
+    else if (lastJob.kind === 'export' && j.files) toast(`Exported ${j.files.length} file${j.files.length>1?'s':''}${j.files.some(f=>f.endsWith('.aaf'))?' including the Pro Tools AAF':''}.`, false, 'Show in Finder', () => pyapi() && pyapi().reveal(j.files[0]));
   }
   lastJob = j;
   setTimeout(tick, j && j.running ? 350 : 1500);
@@ -388,13 +396,24 @@ $('#newCharBtn').onclick = async () => {
   if (!sel) return toast('First select a clean line of the new character on the timeline.', true);
   try { await api('/api/chars/add', {t0:sel.a, t1:sel.b, name:''}); charsSig=''; refresh(); } catch(e){ toast(e.message, true); }
 };
+let tcTouched = false;
+async function fillTC(){ if (tcTouched || !S || !S.file) return;
+  try { const r = await api('/api/default_tc?fps=' + fps); $('#tcIn').value = r.tc; } catch(e){} }
+$('#tcIn').oninput = () => { tcTouched = true; $('#tcIn').classList.toggle('bad', !/^\d\d[:;.]\d\d[:;.]\d\d[:;.]\d\d$/.test($('#tcIn').value.trim())); };
+$('#tcIn').onkeydown = e => e.stopPropagation();
+$('#aafChk').onchange = () => { $('#aafOpts').style.display = $('#aafChk').checked ? '' : 'none'; };
+$('#fpsSel2').onchange = e => { $('#fpsSel').value = e.target.value; $('#fpsSel').onchange({target: $('#fpsSel')}); };
 $('#exportBtn').onclick = async () => {
+  const wavs = $('#wavChk').checked, aaf = $('#aafChk').checked;
+  if (!wavs && !aaf) return toast('Tick WAV stems, Pro Tools AAF, or both.', true);
+  if (aaf && $('#tcIn').classList.contains('bad')) return toast('Start timecode must look like 01:00:00:00', true);
   let folder = null;
   if (pyapi()) folder = await pyapi().choose_folder(); else folder = prompt('Folder to export to');
   if (!folder) return;
-  try { await api('/api/export', {folder, format: fmt, residual: $('#resChk').checked}); tick(); } catch(e){ toast(e.message, true); }
+  try { await api('/api/export', {folder, format: fmt, residual: $('#resChk').checked, wavs, aaf,
+      start_tc: $('#tcIn').value.trim(), fps, guide: $('#guideChk').checked}); tick(); } catch(e){ toast(e.message, true); }
 };
-$('#fpsSel').onchange = e => { fps = parseFloat(e.target.value); selSig=fixSig=''; render(); draw(); };
+$('#fpsSel').onchange = e => { fps = parseFloat(e.target.value); $('#fpsSel2').value = e.target.value; selSig=fixSig=''; tcTouched=false; fillTC(); render(); draw(); };
 
 // ---------- playback
 function setSrc(keepPlaying){

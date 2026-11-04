@@ -15,6 +15,8 @@ python -m PyInstaller --noconfirm --clean --windowed \
   --hidden-import untie.selftest \
   --hidden-import untie.audio_io \
   --hidden-import scipy.cluster.hierarchy \
+  --hidden-import untie.aaf_export \
+  --collect-all aaf2 \
   --exclude-module speechbrain \
   --exclude-module torchaudio \
   --exclude-module huggingface_hub \

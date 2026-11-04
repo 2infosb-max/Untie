@@ -4,3 +4,4 @@ scipy>=1.11
 soundfile>=0.12
 flask>=3
 pillow>=10
+pyaaf2>=1.7

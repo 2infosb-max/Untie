@@ -16,6 +16,8 @@ Mac app that recovers per-character dialogue stems from a mixed mono/stereo dial
 
 Timeline fixes (only X / overlap of / nobody) re-render only the affected stretch.
 
+Export: WAV stems (24-bit or 32-bit float, BWF timecode kept) and/or a Pro Tools AAF (pyaaf2): one composition, one mono track per stem channel, embedded 24-bit audio, timecode start from the source stamp with the sub-frame remainder kept as filler so sync is sample-accurate; optional original-mix guide tracks.
+
 ## Build
 
 GitHub Actions (`.github/workflows/build-dmg.yml`) builds an Apple-silicon and an Intel `.dmg` on every push to `main`, after:
