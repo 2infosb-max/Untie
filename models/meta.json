@@ -1,0 +1,22 @@
+{
+ "sep2": {
+  "sr": 16000,
+  "length": 128000,
+  "voices": 2,
+  "source": "speechbrain/sepformer-whamr16k"
+ },
+ "sep3": {
+  "sr": 8000,
+  "length": 64000,
+  "voices": 3,
+  "source": "speechbrain/sepformer-libri3mix"
+ },
+ "ecapa": {
+  "sr": 16000,
+  "batch": 16,
+  "length": 16000,
+  "dim": 192,
+  "source": "speechbrain/spkrec-ecapa-voxceleb"
+ },
+ "random_weights": false
+}
