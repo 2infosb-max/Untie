@@ -143,6 +143,8 @@ def settings():
 def analyse():
     d = request.get_json(silent=True) or {}
     k = d.get("count")
+    # three or more characters: check every overlap for a third voice
+    P.settings["three"] = bool(k) and int(k) >= 3
 
     def fn(prog):
         prog(1, "Loading the voice networks", None)
