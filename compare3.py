@@ -31,3 +31,14 @@ for repo, sr in (('speechbrain/sepformer-wsj03mix', 8000), ('speechbrain/sepform
     full = [np.zeros_like(mix) for _ in o]
     for f, v in zip(full, o): f[a:a+len(v)] = v
     score(repo, full)
+try:
+    from clearvoice import ClearVoice
+    cv = ClearVoice(task='speech_separation', model_names=['MossFormer2_SS_16K'])
+    net = cv.models[0].model.cpu().eval()
+    st = int(np.argmax(three)); a = max(0, st - 32000); seg = mix[a:a + 64000]
+    with torch.inference_mode(): o = [v[0].numpy() for v in net(torch.from_numpy(seg[None].astype(np.float32)))]
+    full = [np.zeros_like(mix) for _ in o]
+    for f, v in zip(full, o): f[a:a+len(v)] = v[:len(seg)]
+    score('MossFormer2 2-voice (current)', full)
+except Exception as e:
+    print('RESULT MossFormer2 failed', e)

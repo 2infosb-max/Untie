@@ -1,0 +1,13 @@
+name: Compare 3-voice separators
+on: { push: { branches: [compare3] } }
+jobs:
+  compare:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - run: |
+          python -m pip install torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0 "numpy<2" soundfile scipy speechbrain==1.0.3 "huggingface_hub<0.26"
+          python -m pip install --only-binary=llvmlite,numba clearvoice "numba==0.60.0" "llvmlite==0.43.0" torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0 "numpy<2" || true
+          python compare3.py 2>&1 | grep -E "RESULT|Error|error" || true
