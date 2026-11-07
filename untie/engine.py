@@ -121,7 +121,7 @@ class Project:
         self.null_db = None
         self.null_db_24 = None
         self.est = None
-        self.settings = {"voices": 2, "bg": "natural", "thorough": False}
+        self.settings = {"voices": 2, "bg": "natural", "thorough": False, "three": False}
         self.mix_win = None
         self.separated_share = None
         self.analysed_voices = None
@@ -357,12 +357,63 @@ class Project:
             M.locate(s)
         out = M.separate(seg * g, voices) / g
         out = self._fit_to_mix(out, seg)
+        if self.settings.get("three", False):
+            out = self._resplit(M, out, wst, s)
         wins = out[:, wst[:, None] + np.arange(WIN16)[None, :]]          # (v, nW, WIN)
         wdb = db((wins.astype(np.float64) ** 2).mean(2))
         emb = M.embed(wins.reshape(-1, WIN16)).reshape(out.shape[0], len(wst), -1)
         memb, solo = self._mix_info(seg, wdb, wst, M)
         return {"start": s, "out": out.astype(np.float32), "emb": emb.astype(np.float32),
                 "wdb": wdb, "wst": wst, "w": w, "memb": memb, "solo": solo}
+
+    def _win_info(self, M, x, wst):
+        wins = x[:, wst[:, None] + np.arange(WIN16)[None, :]]
+        wdb = db((wins.astype(np.float64) ** 2).mean(2))
+        emb = M.embed(wins.reshape(-1, WIN16).astype(np.float32)).reshape(x.shape[0], len(wst), -1)
+        return wdb, emb
+
+    def _two_people(self, wdb, emb, top):
+        """Per window: are both voices really talking, at similar level, with different voice prints?"""
+        live = (wdb > top - 30) & (wdb > self.floor_db + 3)
+        close = np.abs(wdb[0] - wdb[1]) < self.SOLO_DB
+        cos = np.sum(emb[0] * emb[1], -1)
+        return live.all(0) & close & (cos < self.DIFFERENT_COS)
+
+    def _resplit(self, M, out, wst, s):
+        """Three people at once: the network only splits in two, so one of its two voices still holds
+        two people. Split each voice again; where the halves are clearly two different people, keep
+        them apart (up to 4 voices per moment). The halves always add back up to the voice they came from."""
+        if out.shape[0] != 2:
+            return out
+        wdb, emb = self._win_info(M, out, wst)
+        top = wdb.max()
+        if not self._two_people(wdb, emb, top).any():
+            return out                                         # no overlap here at all
+        L = out.shape[1]
+        centers = wst + WIN16 / 2
+        res = np.zeros((4, L), np.float32)
+        changed = False
+        for i in range(2):
+            par = out[i]
+            rms = float(np.sqrt((par ** 2).mean()))
+            if rms < 1e-6:
+                res[2 * i] = par
+                continue
+            g = float(np.clip(0.05 / rms, 0.05, 2000))
+            if hasattr(M, "locate"):
+                M.locate(s)
+            ch = M.separate(par * g, 2) / g
+            ch = self._fit_to_mix(ch, par)
+            cdb, cemb = self._win_info(M, ch, wst)
+            split = self._two_people(cdb, cemb, top).astype(np.float32)
+            if not split.any():
+                res[2 * i] = par
+                continue
+            changed = True
+            d = np.clip(np.interp(np.arange(L), centers, uniform_filter1d(split, 3, mode="nearest") * 1.5), 0, 1)
+            res[2 * i] = d * ch[0] + (1 - d) * par
+            res[2 * i + 1] = d * ch[1]
+        return res if changed else out
 
     def _overlap_regions(self, chunks):
         """Where two different voices talk at once (from the first pass), in 16 kHz samples."""
@@ -664,26 +715,31 @@ class Project:
             curves = self._island_scores(out, sc, valid, c["wst"], c["wdb"], curves)
             labs = curves.argmax(1)                                          # (v, nfr)
             if self.DISTINCT and nv > 1 and K > 1:
-                # two voices the network pulled apart at the same moment are two different people
-                # (only when both are really talking and their voice prints differ - a single voice
-                # that the network split in two must stay one person)
+                # voices the network pulled apart at the same moment are different people (only when
+                # they really talk together and their voice prints differ - a single voice that the
+                # network split in two must stay one person)
+                from scipy.optimize import linear_sum_assignment
                 fe = db(uniform_filter1d(np.stack([frame_energy(out[i], nfr, HOP16) for i in range(nv)]),
                                          10, axis=1, mode="nearest"))
-                act = fe > max(fe.max() - 30, self.floor_db + 3)
-                srt = np.sort(fe, 0)
-                both = (act.sum(0) >= 2) & ((srt[-1] - srt[-2]) < self.SOLO_DB)
-                pair = np.stack([np.sum(c["emb"][0] * c["emb"][j], -1) for j in range(1, nv)]).max(0)
-                pair_f = np.interp(fr, centers, pair)
-                both &= pair_f < self.DIFFERENT_COS
-                if both.any():
-                    import itertools
-                    perms = np.array(list(itertools.permutations(range(K), min(nv, K))))
-                    tot = np.zeros((len(perms), nfr), np.float32)
-                    for i in range(perms.shape[1]):
-                        tot += np.where(act[i][None], curves[i][perms[:, i]], 0)
-                    best = perms[tot.argmax(0)]                              # (nfr, v)
-                    for i in range(perms.shape[1]):
-                        labs[i, both] = best[both, i]
+                loudest = fe.max(0)
+                act = (fe > max(fe.max() - 30, self.floor_db + 3)) & (fe > loudest[None] - self.SOLO_DB)
+                E = c["emb"]
+                cos = np.einsum("iwd,jwd->ijw", E, E)                       # (v, v, nW)
+                cos_f = np.stack([np.stack([np.interp(fr, centers, cos[i, j]) for j in range(nv)])
+                                  for i in range(nv)])                       # (v, v, nfr)
+                cache = {}
+                for t in np.nonzero(act.sum(0) >= 2)[0]:
+                    idx = np.nonzero(act[:, t])[0]
+                    sub = cos_f[np.ix_(idx, idx)][:, :, t]
+                    if sub[np.triu_indices(len(idx), 1)].min() >= self.DIFFERENT_COS:
+                        continue
+                    if len(idx) > K:
+                        idx = idx[np.argsort(-fe[idx, t])[:K]]
+                    key = (tuple(idx), tuple(np.round(curves[idx, :, t].ravel(), 2)))
+                    if key not in cache:
+                        r, cidx = linear_sum_assignment(-curves[idx, :, t])
+                        cache[key] = cidx
+                    labs[idx, t] = cache[key]
             for i in range(nv):
                 lab = majority(labs[i], K, 15)
                 oh = np.zeros((K, nfr), np.float32)

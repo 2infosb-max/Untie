@@ -121,24 +121,27 @@ class OracleModels:
         self.pos = start
 
     def separate(self, x16, voices=2):
+        """Like a real separator: at each moment the loudest voices go to the outputs, each voice stays
+        in the same output while it talks. Works on the mix or on any part of it (least squares)."""
         s = self.pos
         seg = np.zeros((self.src.shape[0], len(x16)), np.float32)
         k = max(0, min(len(x16), self.src.shape[1] - s))
         seg[:, :k] = self.src[:, s:s + k]
-        tot = seg.sum(0)
-        gain = float(np.dot(x16, tot) / (np.dot(tot, tot) + 1e-12))     # the caller scales its input
-        # like a real separator: at each moment the loudest voices go to the outputs,
-        # and an output can carry different people at different times
         blk = 1600
         nb = int(np.ceil(len(x16) / blk))
-        pad = np.zeros((seg.shape[0], nb * blk), np.float32)
-        pad[:, :len(x16)] = seg
-        e = (pad.reshape(seg.shape[0], nb, blk) ** 2).sum(2)                # (S, nb)
-        # a real separator keeps each voice in the same output while it talks
         S = seg.shape[0]
+        coef = np.zeros((S, nb), np.float32)
+        for t in range(nb):
+            A = seg[:, t * blk:(t + 1) * blk].T
+            if not A.any():
+                continue
+            c, *_ = np.linalg.lstsq(A, x16[t * blk:(t + 1) * blk], rcond=None)
+            coef[:, t] = np.where(np.abs(c) > 1e-3 * np.abs(c).max(), c, 0)
+        comp = np.repeat(coef, blk, axis=1)[:, :len(x16)] * seg               # each voice's part of x16
+        e = (np.pad(comp, ((0, 0), (0, nb * blk - len(x16)))).reshape(S, nb, blk) ** 2).sum(2)
         slot_of = {}
         sel = np.zeros((voices, S, nb), np.float32)
-        thr = e.max() * 1e-5
+        thr = max(e.max() * 1e-5, 1e-12)
         for t in range(nb):
             act = [j for j in np.argsort(-e[:, t]) if e[j, t] > thr][:voices]
             slot_of = {j: q for j, q in slot_of.items() if j in act}
@@ -148,13 +151,20 @@ class OracleModels:
                     slot_of[j] = free.pop(0)
             for j, q in slot_of.items():
                 sel[q, j, t] = 1
+        # extra voices beyond the outputs get lumped in with the quieter output, as a real network does
+        for t in range(nb):
+            used = sel[:, :, t].sum(0) > 0
+            extra = [j for j in range(S) if not used[j] and e[j, t] > thr]
+            if extra and voices > 1:
+                qe = [(e[:, t] * sel[q, :, t]).sum() for q in range(voices)]
+                sel[int(np.argmin(qe)), extra, t] = 1
         out = np.zeros((voices, len(x16)), np.float32)
         for q in range(voices):
             w = np.repeat(sel[q], blk, axis=1)[:, :len(x16)]
-            out[q] = (w * seg).sum(0)
+            out[q] = (w * comp).sum(0)
         if self.leak:
             out = out * (1 - self.leak) + self.leak * out[::-1]
-        return out * gain
+        return out
 
     def embed(self, wins):
         # pitch + formant fingerprint: fine log spectrum 60-3000 Hz, smoothed
