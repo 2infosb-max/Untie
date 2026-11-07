@@ -20,8 +20,10 @@ def chunked(fn, sr_in, L):
         acc[:, a:a+L] += o * w; wsum[a:a+L] += w
     y = acc[:, :len(x)] / np.maximum(wsum[:len(x)], 1e-6)
     return [resample_poly(o, 16000, sr_in) [:len(mix)] if sr_in != 16000 else o for o in y]
-from speechbrain.inference.separation import SepformerSeparation as S
-for repo, sr in (('speechbrain/sepformer-wsj03mix', 8000), ('speechbrain/sepformer-libri3mix', 8000)):
+import os
+PART = os.environ.get('UNTIE_PART')
+for repo, sr in ((('speechbrain/sepformer-wsj03mix', 8000), ('speechbrain/sepformer-libri3mix', 8000)) if PART == 'sb' else ()):
+    from speechbrain.inference.separation import SepformerSeparation as S
     m = S.from_hparams(source=repo, savedir='pt/' + repo.split('/')[1], run_opts={'device': 'cpu'})
     st = int(np.argmax(three)); L = int(sr * 8)
     a = max(0, st - 32000); seg = mix[a:a + 128000]
@@ -31,14 +33,15 @@ for repo, sr in (('speechbrain/sepformer-wsj03mix', 8000), ('speechbrain/sepform
     full = [np.zeros_like(mix) for _ in o]
     for f, v in zip(full, o): f[a:a+len(v)] = v
     score(repo, full)
-try:
-    from clearvoice import ClearVoice
-    cv = ClearVoice(task='speech_separation', model_names=['MossFormer2_SS_16K'])
-    net = cv.models[0].model.cpu().eval()
-    st = int(np.argmax(three)); a = max(0, st - 32000); seg = mix[a:a + 64000]
-    with torch.inference_mode(): o = [v[0].numpy() for v in net(torch.from_numpy(seg[None].astype(np.float32)))]
-    full = [np.zeros_like(mix) for _ in o]
-    for f, v in zip(full, o): f[a:a+len(v)] = v[:len(seg)]
-    score('MossFormer2 2-voice (current)', full)
-except Exception as e:
-    print('RESULT MossFormer2 failed', e)
+if PART == 'moss':
+    try:
+      from clearvoice import ClearVoice
+      cv = ClearVoice(task='speech_separation', model_names=['MossFormer2_SS_16K'])
+      net = cv.models[0].model.cpu().eval()
+      st = int(np.argmax(three)); a = max(0, st - 32000); seg = mix[a:a + 64000]
+      with torch.inference_mode(): o = [v[0].numpy() for v in net(torch.from_numpy(seg[None].astype(np.float32)))]
+      full = [np.zeros_like(mix) for _ in o]
+      for f, v in zip(full, o): f[a:a+len(v)] = v[:len(seg)]
+      score('MossFormer2 2-voice (current)', full)
+    except Exception as e:
+      print('RESULT MossFormer2 failed', e)
