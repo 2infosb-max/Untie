@@ -121,7 +121,7 @@ class Project:
         self.null_db = None
         self.null_db_24 = None
         self.est = None
-        self.settings = {"voices": 2, "bg": "natural", "thorough": False, "three": False}
+        self.settings = {"voices": 2, "bg": "natural", "thorough": False, "three": True, "intensity": 0.7}
         self.mix_win = None
         self.separated_share = None
         self.analysed_voices = None
@@ -357,8 +357,11 @@ class Project:
             M.locate(s)
         out = M.separate(seg * g, voices) / g
         out = self._fit_to_mix(out, seg)
-        if self.settings.get("three", False):
-            out = self._resplit(M, out, wst, s)
+        if self.settings.get("three", True):
+            if self.THREE_MODE == "sep3" and "sep3" in getattr(M, "meta", {}):
+                out = self._with_three(M, out, seg, g, wst, s)
+            else:
+                out = self._resplit(M, out, wst, s)
         wins = out[:, wst[:, None] + np.arange(WIN16)[None, :]]          # (v, nW, WIN)
         wdb = db((wins.astype(np.float64) ** 2).mean(2))
         emb = M.embed(wins.reshape(-1, WIN16)).reshape(out.shape[0], len(wst), -1)
@@ -378,6 +381,40 @@ class Project:
         close = np.abs(wdb[0] - wdb[1]) < self.SOLO_DB
         cos = np.sum(emb[0] * emb[1], -1)
         return live.all(0) & close & (cos < self.DIFFERENT_COS)
+
+    THREE_MODE = "sep3"
+    THREE_ALWAYS = False
+
+    def _with_three(self, M, out2, seg, g, wst, s):
+        """Three people at once: where the two-voice split still holds two people in one voice, use
+        the three-voice network's split for that stretch."""
+        wdb, emb = self._win_info(M, out2, wst)
+        top = wdb.max()
+        if not self._two_people(wdb, emb, top).any():
+            return out2
+        if hasattr(M, "locate"):
+            M.locate(s)
+        out3 = self._fit_to_mix(M.separate(seg * g, 3) / g, seg)
+        if self.THREE_ALWAYS:
+            return out3
+        w3db, e3 = self._win_info(M, out3, wst)
+        # three distinct, live voices in this window?
+        live = (w3db > top - 30) & (w3db > self.floor_db + 3)
+        cos = np.einsum("iwd,jwd->ijw", e3, e3)
+        three = live.all(0)
+        for i in range(3):
+            for j in range(i + 1, 3):
+                three &= cos[i, j] < self.DIFFERENT_COS
+        if not three.any():
+            return out2
+        L = out2.shape[1]
+        d = np.clip(np.interp(np.arange(L), wst + WIN16 / 2,
+                              uniform_filter1d(three.astype(np.float32), 3, mode="nearest") * 1.5), 0, 1)
+        # slots: three-voice outputs where three talk, two-voice outputs elsewhere
+        res = np.zeros((5, L), np.float32)
+        res[:3] = d[None] * out3
+        res[3:] = (1 - d)[None] * out2
+        return res
 
     def _resplit(self, M, out, wst, s):
         """Three people at once: the network only splits in two, so one of its two voices still holds
@@ -656,6 +693,10 @@ class Project:
     DISTINCT = True
     DIFFERENT_COS = 0.4        # voice prints of two separated voices below this = two people
     MASK_POWER = 1.0
+    COMB_GAIN = 1.5
+    SHARPEN = 0.5
+    GATE = 1.5
+    OV_WIDEN = 12.0
     ISLAND_MIX = 0.0          # how much a whole stretch of talking decides its own label
 
     def _island_scores(self, out, sc, valid, wst, wdb, curves):
@@ -775,7 +816,10 @@ class Project:
         Es = uniform_filter1d(self.E, 5, axis=1, mode="nearest")
         top = Es.max(0)
         floor = 10 ** ((self.floor_db + 6) / 10)
-        active = (Es > top[None, :] * 10 ** (-14 / 10)) & (Es > floor)
+        inten = float(self.settings.get("intensity", 0.7))
+        # higher splitting intensity: a quieter second voice already counts as an overlap
+        ov_db = 14 + self.OV_WIDEN * inten
+        active = (Es > top[None, :] * 10 ** (-ov_db / 10)) & (Es > floor)
         speech = self.speech_raw | (active.any(0) & (top > floor * 2))
         o_raw = (active.sum(0) >= 2) & speech
         dom = majority(Es.argmax(0), K, 9) if K > 1 else np.zeros(nF, int)
@@ -827,8 +871,20 @@ class Project:
         estp = self._estp
         P = np.abs(np.fft.rfft(estp[:, idx] * self.win16, axis=-1)) ** 2               # (K,B,321)
         P *= self.allow[:, j0:j1, None]
-        if self.MASK_POWER != 1.0:
-            P = P ** self.MASK_POWER
+        inten = float(self.settings.get("intensity", 0.7))
+        if inten > 0 and getattr(self, "_f0", None) is not None:
+            # each character's own harmonics (from their pitch) pull those frequencies to them
+            f0 = self._f0[:, j0:j1]                                           # (K,B)
+            sig = np.maximum(12.0, 0.045 * f0)[..., None]
+            h = np.round(f16[None, None, :] / np.maximum(f0[..., None], 1))
+            comb = np.exp(-0.5 * ((f16[None, None, :] - h * f0[..., None]) / sig) ** 2)
+            comb *= (f16[None, None, :] < 5000) & (h >= 1)
+            comb = np.where((f0 > 0)[..., None], comb, 1.0)
+            P = P * (0.12 + comb) ** (self.COMB_GAIN * inten)
+        pw = 1 + self.SHARPEN * inten ** 2                                                # sharper share-out
+        if pw != 1:
+            P = P / (P.max() + 1e-30)
+            P = P ** pw
         hard = self.hard[:, j0:j1]
         S = P.sum(0)
         tiny = 1e-12
@@ -844,6 +900,9 @@ class Project:
         soft_n[:, :, m:] = hb[:, :, None]
         blend = np.clip((fn - valid_hz * 0.85) / (valid_hz * 0.15), 0, 1)               # (nb,)
         soft_n = soft_n * (1 - blend) + hb[:, :, None] * blend
+        if inten > 0:
+            # strictness: a frequency a character only partly owns goes to the Residual, not their stem
+            soft_n = soft_n ** (1 + self.GATE * inten)
         o = self.o[j0:j1][None, :, None]
         voice = (1 - o) * hard[:, :, None] + o * soft_n
         if self.settings.get("bg") == "clean":
@@ -865,6 +924,28 @@ class Project:
     def stem_paths(self):
         return [os.path.join(self.project_dir, "stem_%d.wav" % i) for i in range(len(self.chars) + 1)]
 
+    def _overlap_pitch(self):
+        """F0 of each character's separated voice, 10 ms frames, only where voices overlap."""
+        from .pitch import yin
+        K = len(self.chars)
+        f0 = np.zeros((K, self.nF), np.float32)
+        if self.est is None or not hasattr(self, "o"):
+            return f0
+        for a, b in runs(self.o > 0.01):
+            a, b = max(0, a - 20), min(self.nF, b + 20)
+            for k in range(K):
+                x = self.est[k, a * HOP16:b * HOP16]
+                if not x.any():
+                    continue
+                # YIN frame j is centred at j*hop + win/2; our frame j at j*hop + 80 (PAD16 offset)
+                tr, per = yin(x, SR16, HOP16)
+                win = int(SR16 / 55.0 * 2.2)
+                shift = int(round((win / 2 - HOP16 / 2) / HOP16))
+                j = np.arange(len(tr)) + a + shift
+                m = j < b
+                f0[k, j[m]] = tr[m]
+        return f0
+
     def _prepare_render(self):
         K = len(self.chars)
         L = self.nF * HOP16 + NFFT16
@@ -873,6 +954,7 @@ class Project:
         if self.settings.get("bg") == "clean":
             self._resp = np.zeros(L, np.float32)
             self._resp[PAD16:PAD16 + self.L16] = self.mono16 - self.est.sum(0)
+        self._f0 = self._overlap_pitch() if float(self.settings.get("intensity", 0.7)) > 0 else None
         Lp = self.nF * self.hop + self.nfft
         self._xp = np.zeros((self.C, Lp), np.float32)
         self._xp[:, self.pad:self.pad + self.N] = self.x.T
@@ -1042,6 +1124,16 @@ class Project:
                                  lambda p, m, e: progress(off + p * (100 - off) / 100, m, None), lead=lead)
             outs.append(path)
             self.aaf_tc = tc
+        try:
+            from . import voice_profile
+            _, vmd = voice_profile.analyse(self, fps)
+            vp = os.path.join(folder, "%s_UNTIE_voice_analysis.md" % base)
+            with open(vp, "w") as f:
+                f.write(vmd)
+            outs.append(vp)
+        except Exception:  # noqa: BLE001  (the stems matter more than the report)
+            import traceback
+            traceback.print_exc()
         rep = os.path.join(folder, "%s_UNTIE_report.txt" % base)
         with open(rep, "w") as f:
             f.write("Un-tie by Sound Brewery\nSource: %s\n" % self.path)
@@ -1051,6 +1143,7 @@ class Project:
             if aaf:
                 f.write("AAF starts at %s (%s fps); stereo stems are L/R mono track pairs\n" % (tc, fps))
             f.write("Null test (all stems + residual vs original): %.1f dB\n" % (self.null_db or -999))
+            f.write("Splitting intensity: %d%%\n" % round(100 * float(self.settings.get("intensity", 0.7))))
             f.write("Fixes applied: %d\n\nFiles:\n" % len(self.edits))
             for p in outs:
                 f.write("  " + os.path.basename(p) + "\n")

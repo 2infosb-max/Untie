@@ -18,6 +18,9 @@ SOURCES = {
     # MossFormer2 (ClearerVoice-Studio, Apache-2.0): ~20 dB on real two-voice speech where
     # SepFormer-WHAMR managed ~4 dB in our tests
     "sep2": ("alibabasglab/MossFormer2_SS_16K", 16000, 2),
+    # three people at once: SepFormer trained on 3-speaker LibriMix beat every other ready-made
+    # model on our three-way test (used only where three voices overlap)
+    "sep3": ("speechbrain/sepformer-libri3mix", 8000, 3),
     "ecapa": ("speechbrain/spkrec-ecapa-voxceleb", 16000, None),
 }
 
@@ -138,7 +141,7 @@ def main():
                 dim = int(net(ex).shape[1])
                 meta[name] = {"sr": sr, "batch": ECAPA_BATCH, "length": 16000, "dim": dim, "source": repo}
             else:
-                L = int(SEP_SECONDS * sr)
+                L = int((8.0 if name == "sep3" else SEP_SECONDS) * sr)
                 ex = torch.randn(1, L) * 0.05
                 traced = torch.jit.trace(net, ex, check_trace=False)
                 t = torch.arange(L) / sr

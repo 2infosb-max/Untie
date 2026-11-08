@@ -130,6 +130,11 @@ def settings():
     d = request.get_json(silent=True) or {}
     if "voices" in d and int(d["voices"]) == 2:
         P.settings["voices"] = int(d["voices"])
+    if "intensity" in d:
+        v = min(1.0, max(0.0, float(d["intensity"]) / 100.0))
+        if abs(v - P.settings.get("intensity", 0.7)) > 1e-6:
+            P.settings["intensity"] = v
+            P.rendered = False
     if "thorough" in d:
         P.settings["thorough"] = bool(d["thorough"])
     if d.get("bg") in ("natural", "clean"):
@@ -143,8 +148,8 @@ def settings():
 def analyse():
     d = request.get_json(silent=True) or {}
     k = d.get("count")
-    # three or more characters: check every overlap for a third voice
-    P.settings["three"] = bool(k) and int(k) >= 3
+    # two characters only: no need to look for a third voice
+    P.settings["three"] = not (bool(k) and int(k) == 2)
 
     def fn(prog):
         prog(1, "Loading the voice networks", None)
@@ -225,6 +230,20 @@ def export():
                                 guide=bool(d.get("guide", True)))
         JOB["files"] = res["files"]
     return run_job("export", fn)
+
+
+@app.get("/api/voice")
+def voice():
+    if not P.rendered:
+        return jsonify(error="Un-tie the file first."), 400
+    from . import voice_profile
+    try:
+        data, md = voice_profile.analyse(P, float(request.args.get("fps", 25)))
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify(error="Voice analysis failed: %s" % e), 500
+    P.voice_report = md
+    return jsonify(markdown=md)
 
 
 @app.get("/api/default_tc")

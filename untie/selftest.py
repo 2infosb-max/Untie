@@ -50,5 +50,6 @@ def run(folder, voices=2):
     print("SELFTEST null_db=%.1f" % p.null_db)
     outs = p.export(tempfile.mkdtemp(), aaf=True)
     assert any(o.endswith(".aaf") for o in outs)
+    assert any(o.endswith("_voice_analysis.md") for o in outs), "voice analysis missing"
     print("SELFTEST exported", [os.path.basename(o) for o in outs])
     return {"found": found, "expected": len(truths), "sdr": best, "gain": gain, "null_db": p.null_db}

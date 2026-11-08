@@ -106,6 +106,19 @@ canvas{display:block;width:100%;height:100%;cursor:text}
 .toast a{color:var(--amber);cursor:pointer;white-space:nowrap}
 .tcin{width:118px;background:#111417;border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font:12.5px var(--mono);text-align:center}
 .tcin.bad{border-color:var(--bad)}
+.intval{color:var(--amber2);font:600 13px var(--mono)}
+.range{width:100%;accent-color:var(--amber);margin:6px 0 0}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:60;align-items:center;justify-content:center}
+.modal.on{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--line2);border-radius:12px;width:min(1100px,92vw);height:86vh;display:flex;flex-direction:column}
+.sheethead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.sheethead h2{margin:0;font-size:15px}
+.report{overflow:auto;padding:6px 22px 30px;user-select:text;-webkit-user-select:text;line-height:1.5}
+.report h1{font-size:19px}.report h2{font-size:16px;color:var(--amber2);margin-top:22px}.report h3{font-size:14.5px;margin:18px 0 4px;border-top:1px solid var(--line);padding-top:12px}
+.report table{border-collapse:collapse;margin:8px 0;font-size:12.3px;width:100%}
+.report th,.report td{border:1px solid var(--line2);padding:5px 8px;text-align:left;vertical-align:top}
+.report th{background:#1E2328}
+.report ul{margin:4px 0;padding-left:20px}
 .keys{color:var(--faint);font-size:11px;margin-left:auto}
 .keys kbd{font:10.5px var(--mono);border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--dim)}
 </style>
@@ -113,7 +126,7 @@ canvas{display:block;width:100%;height:100%;cursor:text}
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="word">Un<span class="cut">-</span>tie</span><span class="by">by Sound Brewery</span></div>
+    <div class="brand"><span class="word">Un<span class="cut">-</span>tie</span><span class="by">by Sound Brewery</span><span class="by" id="ver"></span></div>
     <div class="fileinfo" id="fileinfo"></div>
     <div class="spacer"></div>
     <div class="null" id="nullinfo"></div>
@@ -148,8 +161,12 @@ canvas{display:block;width:100%;height:100%;cursor:text}
       <div class="sh"><span class="num">4</span><h3>Un-tie</h3></div>
       <div class="row"><span class="lbl">Background noise inside lines</span>
         <div class="seg" id="bgSeg"><button data-v="natural" class="on">Keep</button><button data-v="clean">To residual</button></div></div>
+      <div class="row"><span class="lbl">Splitting intensity</span><b id="intVal" class="intval">70%</b></div>
+      <input type="range" id="intRange" min="0" max="100" step="5" value="70" class="range">
+      <div class="row" style="margin-top:2px"><span class="hint" style="margin:0">Natural</span><span class="spacer"></span><span class="hint" style="margin:0">Strict (no bleed)</span></div>
       <div class="row"><button class="btn primary wide" id="untieBtn">Un-tie into stems</button></div>
-      <p class="hint">Where one character talks alone, their stem gets the original sound untouched. Only the overlaps are separated.</p>
+      <div class="row"><button class="btn wide" id="voiceBtn">Voice analysis report</button></div>
+      <p class="hint">Where one character talks alone, their stem is the original sound, untouched. In overlaps, higher intensity sends anything Un-tie isn't sure about to the Residual stem instead of letting it bleed into another character. The voices in overlaps get thinner as you go higher.</p>
     </section>
 
     <section class="step off" id="s5">
@@ -192,6 +209,8 @@ canvas{display:block;width:100%;height:100%;cursor:text}
     </div>
   </main>
 </div>
+<div class="modal" id="voiceModal"><div class="sheet"><div class="sheethead"><h2>Voice analysis</h2><span class="spacer"></span>
+  <button class="btn small" id="voiceCopy">Copy</button><button class="btn small" id="voiceClose">Close</button></div><div class="report" id="voiceBody">Analysing…</div></div></div>
 <div class="toast" id="toast"></div>
 <audio id="au" preload="auto"></audio>
 
@@ -263,6 +282,7 @@ async function tick(){
 function setSeg(el, v){ el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v == v)); }
 function render(){
   const f = S.file, busy = S.job.running;
+  $('#ver').textContent = 'v' + S.version;
   $('#empty').style.display = f ? 'none' : '';
   $('#fileinfo').innerHTML = f ? [
     `<span class="chip"><b>${esc(f.name)}</b></span>`,
@@ -277,6 +297,8 @@ function render(){
   setSeg($('#bgSeg'), S.settings.bg);
   $('#analyseBtn').textContent = S.analysed ? 'Analyse again' : 'Analyse';
   $('#thoroughChk').checked = !!S.settings.thorough;
+  if (document.activeElement !== $('#intRange')){ const iv = Math.round((S.settings.intensity ?? 0.7) * 100); $('#intRange').value = iv; $('#intVal').textContent = iv + '%'; }
+  $('#voiceBtn').disabled = !S.rendered;
   if (S.analysed && S.separated_share != null) $('#anHint').textContent = `Separated ${Math.round(S.separated_share*100)}% of the talking (overlaps and unclear voices); the rest is one clear voice at a time.`;
   $('#untieBtn').textContent = S.rendered ? 'Un-tie again' : 'Un-tie into stems';
   // progress (shown in step 2 for long jobs, also used for un-tie/export)
@@ -391,6 +413,33 @@ let fmt = 'pcm24';
 $('#fmtSeg').onclick = e => { const b = e.target.closest('button'); if (b){ fmt = b.dataset.v; setSeg($('#fmtSeg'), fmt); } };
 $('#thoroughChk').onchange = e => api('/api/settings', {thorough: e.target.checked}).then(refresh);
 $('#analyseBtn').onclick = () => api('/api/analyse', {count: $('#countSel').value || null}).then(tick).catch(e=>toast(e.message,true));
+function mdToHtml(md){
+  const e = t => esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  const L = md.split('\n'); let h = '', i = 0;
+  while (i < L.length){
+    const l = L[i];
+    if (l.startsWith('|')){ const rows=[]; while (i < L.length && L[i].startsWith('|')){ rows.push(L[i]); i++; }
+      const cells = r => r.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      h += '<table><tr>' + cells(rows[0]).map(c=>'<th>'+e(c)+'</th>').join('') + '</tr>' +
+        rows.slice(2).map(r=>'<tr>'+cells(r).map(c=>'<td>'+e(c)+'</td>').join('')+'</tr>').join('') + '</table>'; continue; }
+    if (l.startsWith('- ')){ h += '<ul>'; while (i < L.length && L[i].startsWith('- ')){ h += '<li>'+e(L[i].slice(2))+'</li>'; i++; } h += '</ul>'; continue; }
+    const m = l.match(/^(#{1,3}) (.*)/);
+    if (m) h += `<h${m[1].length}>${e(m[2])}</h${m[1].length}>`; else if (l.trim()) h += '<p>'+e(l.replace(/  $/,''))+'</p>';
+    i++;
+  }
+  return h;
+}
+let voiceMd = '';
+$('#voiceBtn').onclick = async () => {
+  if (!S.rendered) return toast('Un-tie the file first.', true);
+  $('#voiceModal').classList.add('on'); $('#voiceBody').textContent = 'Analysing the voices…';
+  try { const r = await api('/api/voice?fps=' + fps); voiceMd = r.markdown; $('#voiceBody').innerHTML = mdToHtml(r.markdown); }
+  catch(e){ $('#voiceBody').textContent = e.message; }
+};
+$('#voiceClose').onclick = () => $('#voiceModal').classList.remove('on');
+$('#voiceCopy').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(voiceMd); toast('Report copied.'); };
+$('#intRange').oninput = e => { $('#intVal').textContent = e.target.value + '%'; };
+$('#intRange').onchange = e => api('/api/settings', {intensity: +e.target.value}).then(() => { refresh(); if (S && S.analysed && S.chars.length) toast('Click Un-tie again to apply the new intensity.'); });
 $('#untieBtn').onclick = () => api('/api/untie', {}).then(tick).catch(e=>toast(e.message,true));
 $('#pstop').onclick = () => api('/api/cancel', {});
 $('#newCharBtn').onclick = async () => {
@@ -564,7 +613,8 @@ function zoomSel(){ if (!sel) return; const pad = (sel.b-sel.a)*.15; view.t0 = s
 $('#zoomIn').onclick = () => zoomBy(.5); $('#zoomOut').onclick = () => zoomBy(2);
 $('#zoomAll').onclick = () => { if (S && S.file){ view = {t0:0, t1:S.file.seconds}; draw(); } };
 window.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
+  if (e.key === 'Escape') $('#voiceModal').classList.remove('on');
   if (e.code === 'Space'){ e.preventDefault(); togglePlay(); }
   else if (e.key === 'z' || e.key === 'Z') zoomSel();
   else if (e.key === '+' || e.key === '=') zoomBy(.5);

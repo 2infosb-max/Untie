@@ -16,6 +16,10 @@ python -m PyInstaller --noconfirm --clean --windowed \
   --hidden-import untie.audio_io \
   --hidden-import scipy.cluster.hierarchy \
   --hidden-import untie.aaf_export \
+  --hidden-import untie.pitch \
+  --hidden-import untie.voice_profile \
+  --hidden-import scipy.optimize \
+  --hidden-import scipy.signal \
   --collect-all aaf2 \
   --exclude-module speechbrain \
   --exclude-module torchaudio \

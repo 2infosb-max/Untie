@@ -33,10 +33,12 @@ jobs:
         run: |
           python tests/engine_test.py
           python tests/aaf_test.py
+          python tests/three_test.py
       - name: Download and freeze the voice networks
         run: |
           python -m pip install speechbrain==1.0.3 "huggingface_hub<0.26" ${{ matrix.torch }} "${{ matrix.numpy }}"
           python tools/export_models.py --only ecapa
+          python tools/export_models.py --only sep3
           # (build-time only; older numba/llvmlite because newer ones have no Intel-Mac wheels)
           python -m pip install --only-binary=llvmlite,numba clearvoice "numba==0.60.0" "llvmlite==0.43.0" ${{ matrix.torch }} "${{ matrix.numpy }}"
           python tools/export_models.py --only sep2

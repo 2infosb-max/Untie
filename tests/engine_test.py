@@ -83,7 +83,8 @@ def main():
         p2.add_character(nm, a, b)
     p2.untie()
     outs = p2.export(tmp)
-    assert all(audio_io.read_bext_time_ref(o) == tc for o in outs)
+    assert all(audio_io.read_bext_time_ref(o) == tc for o in outs if o.endswith(".wav"))
+    assert any(o.endswith("_voice_analysis.md") for o in outs)
     outs = p2.export(tmp, fmt="float32")
     x = sf.read(outs[0], dtype="float32")[0]
     assert len(x) == len(mix)

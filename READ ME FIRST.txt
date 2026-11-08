@@ -18,7 +18,12 @@ EVERY TIME YOU USE IT
 3. Check the characters and type their real names. If one person was split into two, use
    ... > Same person as... to merge them. If two people were put together, drag over a clean line
    of one of them on the timeline and click "+ New from selection".
-4. Click "Un-tie into stems". Use the Listen buttons (or keys 0-9) to hear each stem.
+4. Set "Splitting intensity" (default 70%), then click "Un-tie into stems".
+   Higher = stricter: in overlaps, anything Un-tie isn't sure about goes to the Residual stem instead
+   of bleeding into another character, but the voices in overlaps get thinner. Lower = more natural.
+   After moving the slider, click "Un-tie again" to apply it.
+   "Voice analysis report" shows each character's measured voice: male/female range, pitch, formants,
+   texture, nasality, dynamics, delivery, and how easy each pair of voices is to keep apart. Use the Listen buttons (or keys 0-9) to hear each stem.
 5. Fix anything that's wrong: drag over the stretch on the timeline, then click
    - a name under "Only ... is talking" (gives the whole stretch, untouched, to that person),
    - two or more names under "Overlap of", then Separate (splits just those voices there),
@@ -27,6 +32,7 @@ EVERY TIME YOU USE IT
 6. Export: tick what you want, click "Export..." and pick a folder.
    - WAV stems: one WAV per character + Residual, same length as the source, with its timecode stamp
      (in Pro Tools: import, then Spot > Original Time Stamp).
+   - Voice analysis: a ..._voice_analysis.md report is saved with every export.
    - Pro Tools AAF: every stem on its own track (stereo stems as L/R mono tracks), audio inside the AAF,
      starting at the "AAF start timecode" (filled in from the source's stamp - set the rate to match your
      session). In Pro Tools: File > Import > Session Data, choose the .aaf, then OK.
